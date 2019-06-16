@@ -121,7 +121,7 @@ impl<'a> StringLexer<'a> {
         if self.pos < self.buf.len() {
             Ok(self.buf[self.pos])
         } else {
-            Err(PdfError::EOF);
+            Err(PdfError::EOF)
         }
     }
 }

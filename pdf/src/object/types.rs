@@ -18,7 +18,7 @@ impl Object for PagesNode {
             PagesNode::Leaf (ref l) => l.serialize(out),
         }
     }
-    fn from_primitive(p: Primitive, r: &Resolve) -> Result<PagesNode> {
+    fn from_primitive(p: Primitive, r: &dyn Resolve) -> Result<PagesNode> {
         let dict = Dictionary::from_primitive(p, r)?;
         match dict["Type"].clone().to_name()?.as_str() {
             "Page" => Ok(PagesNode::Leaf (Page::from_primitive(Primitive::Dictionary(dict), r)?)),
@@ -76,7 +76,7 @@ pub struct PageTree {
 
 
     /// Exists to be inherited to a 'Page' object. Note: *Inheritable*.
-    // Note about inheritance... if we wanted to 'inherit' things at the time of reading, we would
+    // Note about inheritance..= if we wanted to 'inherit' things at the time of reading, we would
     // want Option<Ref<Resources>> here most likely.
     #[pdf(key="Resources")]
     pub resources: Option<Resources>,
@@ -156,7 +156,7 @@ pub enum Font {
 }
 impl Object for Font {
     fn serialize<W: io::Write>(&self, _out: &mut W) -> io::Result<()> { unimplemented!() }
-    fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
+    fn from_primitive(p: Primitive, resolve: &dyn Resolve) -> Result<Self> {
         let mut dict = Dictionary::from_primitive(p, resolve)?;
         dict.expect("Type", "Font", true)?;
         
@@ -172,7 +172,7 @@ impl Object for Font {
                     "CIDFontType2" => Font::CIDFontType2,
                     s => bail!("Wrong /Type {} for font dictionary.", s),
                 }),
-            _ => err!(PdfError::MissingEntry {typ: "Font", field: "Subtype"}),
+            _ => err!(PdfError::MissingEntry {typ: "Font", field: "Subtype".into()}),
         }
     }
 }
@@ -196,12 +196,12 @@ impl Object for XObject {
     fn serialize<W: io::Write>(&self, _out: &mut W) -> io::Result<()> {
         unimplemented!();
     }
-    fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
+    fn from_primitive(p: Primitive, resolve: &dyn Resolve) -> Result<Self> {
         let mut stream = PdfStream::from_primitive(p, resolve)?;
         stream.info.expect("Type", "XObject", true)?;
 
         let subty = stream.info.get("Subtype")
-            .ok_or(PdfError::MissingEntry { typ: "XObject", field: "Subtype"})?.clone()
+            .ok_or(PdfError::MissingEntry { typ: "XObject", field: "Subtype".into()})?.clone()
             .to_name()?;
         Ok(match subty.as_str() {
             "PS" => XObject::Postscript (PostScriptXObject::from_primitive(Primitive::Stream(stream), resolve)?),
@@ -314,7 +314,7 @@ impl Object for Counter {
         out.write_all(style_code.as_bytes())?;
         Ok(())
     }
-    fn from_primitive(_: Primitive, _: &Resolve) -> Result<Self> {
+    fn from_primitive(_: Primitive, _: &dyn Resolve) -> Result<Self> {
         unimplemented!();
     }
 }
@@ -339,10 +339,10 @@ impl<T: Object> Object for NameTree<T> {
     fn serialize<W: io::Write>(&self, _out: &mut W) -> io::Result<()> {
         unimplemented!();
     }
-    fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
+    fn from_primitive(p: Primitive, resolve: &dyn Resolve) -> Result<Self> {
         let mut dict = p.to_dictionary(resolve)?;
         
-        // Quite long function...
+        // Quite long function..=
         let limits = match dict.remove("Limits") {
             Some(limits) => {
                 let limits = limits.to_array(resolve)?;
@@ -524,7 +524,7 @@ impl Object for Rect {
     fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
         write!(out, "[{} {} {} {}]", self.left, self.top, self.right, self.bottom)
     }
-    fn from_primitive(p: Primitive, r: &Resolve) -> Result<Self> {
+    fn from_primitive(p: Primitive, r: &dyn Resolve) -> Result<Self> {
         let arr = p.to_array(r)?;
         if arr.len() != 4 {
             bail!("len != 4");

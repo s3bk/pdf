@@ -34,7 +34,7 @@ pub struct Content {
 }
 
 impl Content {
-    fn parse_from(data: &[u8], resolve: &Resolve) -> Result<Content> {
+    fn parse_from(data: &[u8], resolve: &dyn Resolve) -> Result<Content> {
         let mut lexer = Lexer::new(data);
 
         let mut content = Content {operations: Vec::new()};
@@ -72,7 +72,7 @@ impl Object for Content {
     /// Write object as a byte stream
     fn serialize<W: io::Write>(&self, _out: &mut W) -> io::Result<()> {unimplemented!()}
     /// Convert primitive to Self
-    fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
+    fn from_primitive(p: Primitive, resolve: &dyn Resolve) -> Result<Self> {
         let PdfStream {info, mut data} = PdfStream::from_primitive(p, resolve)?;
         let mut info = StreamInfo::<()>::from_primitive(Primitive::Dictionary (info), resolve)?;
         decode_fully(&mut data, &mut info.filters)?;

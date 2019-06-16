@@ -18,7 +18,7 @@ Read, alter and write PDF files.
 path = "../derive"
 
 [dependencies]
-failure = "0.1"
+snafu = "0.4"
 isatty = "0.1"
 num-traits = "0.1.36"
 inflate = "0.1.1"

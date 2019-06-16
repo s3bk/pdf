@@ -38,7 +38,7 @@ pub trait Backend: Sized {
         let (xref_sections, trailer) = read_xref_and_trailer_at(&mut lexer, NO_RESOLVE)?;
         
         let highest_id = trailer.get("Size")
-            .ok_or_else(|| PdfError::EntryNotFound {key: "Size"})?
+            .ok_or_else(|| PdfError::MissingEntry {field: "Size".into(), typ: "XRefTable"})?
             .clone().as_integer()?;
 
         let mut refs = XRefTable::new(highest_id as ObjNr);

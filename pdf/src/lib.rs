@@ -9,7 +9,7 @@
 #[macro_use]
 extern crate pdf_derive;
 #[macro_use]
-extern crate failure;
+extern crate snafu;
 
 extern crate num_traits;
 extern crate inflate;

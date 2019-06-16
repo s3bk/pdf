@@ -46,7 +46,7 @@ impl<'a> Lexer<'a> {
     pub fn peek(&self) -> Result<Substr<'a>> {
         match self.next_word(true) {
             Ok((substr, _)) => Ok(substr),
-            Err(PdfError::EOF, _) => Ok(self.new_substr(self.pos..self.pos)),
+            Err(PdfError::EOF) => Ok(self.new_substr(self.pos..self.pos)),
             Err(e) => Err(e),
         }
 
@@ -127,7 +127,9 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    pub fn next_as<T: FromStr>(&mut self) -> Result<T> {
+    pub fn next_as<T>(&mut self) -> Result<T>
+        where T: FromStr, T::Err: std::error::Error + 'static
+    {
         self.next().and_then(|word| word.to::<T>())
     }
 
@@ -317,11 +319,10 @@ impl<'a> Substr<'a> {
     pub fn to_vec(&self) -> Vec<u8> {
         self.slice.to_vec()
     }
-    pub fn to<T: FromStr>(&self) -> Result<T> {
-        std::str::from_utf8(self.slice)?.parse::<T>()
-            .map_err(|_| PdfError::FromStrError {
-                word: self.slice.into()
-            })
+    pub fn to<T>(&self) -> Result<T>
+        where T: FromStr, T::Err: std::error::Error + 'static
+    {
+        std::str::from_utf8(self.slice)?.parse::<T>().map_err(|e| PdfError::Parse { source: e.into() })
     }
     pub fn is_integer(&self) -> bool {
         match self.to::<i32>() {

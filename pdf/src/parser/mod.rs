@@ -15,13 +15,13 @@ use object::{ObjNr, GenNr, PlainRef, Resolve};
 
 /// Can parse stream but only if its dictionary does not contain indirect references.
 /// Use `parse_stream` if this is insufficient.
-pub fn parse(data: &[u8], r: &Resolve) -> Result<Primitive> {
+pub fn parse(data: &[u8], r: &dyn Resolve) -> Result<Primitive> {
     parse_with_lexer(&mut Lexer::new(data), r)
 }
 
 /// Recursive. Can parse stream but only if its dictionary does not contain indirect references.
 /// Use `parse_stream` if this is not sufficient.
-pub fn parse_with_lexer(lexer: &mut Lexer, r: &Resolve) -> Result<Primitive> {
+pub fn parse_with_lexer(lexer: &mut Lexer, r: &dyn Resolve) -> Result<Primitive> {
     let first_lexeme = lexer.next()?;
 
     let obj = if first_lexeme.equals(b"<<") {
@@ -46,7 +46,7 @@ pub fn parse_with_lexer(lexer: &mut Lexer, r: &Resolve) -> Result<Primitive> {
             let length = match dict.get("Length") {
                 Some(&Primitive::Integer (n)) => n,
                 Some(&Primitive::Reference (n)) => r.resolve(n)?.as_integer()?,
-                _ => err!(PdfError::EntryNotFound {key: "Length"}),
+                _ => err!(PdfError::MissingEntry {field: "Length".into(), typ: "<Stream>"}),
             };
 
             
@@ -145,12 +145,12 @@ pub fn parse_with_lexer(lexer: &mut Lexer, r: &Resolve) -> Result<Primitive> {
 }
 
 
-pub fn parse_stream(data: &[u8], resolve: &Resolve) -> Result<PdfStream> {
+pub fn parse_stream(data: &[u8], resolve: &dyn Resolve) -> Result<PdfStream> {
     parse_stream_with_lexer(&mut Lexer::new(data), resolve)
 }
 
 
-fn parse_stream_with_lexer(lexer: &mut Lexer, r: &Resolve) -> Result<PdfStream> {
+fn parse_stream_with_lexer(lexer: &mut Lexer, r: &dyn Resolve) -> Result<PdfStream> {
     let first_lexeme = lexer.next()?;
 
     let obj = if first_lexeme.equals(b"<<") {
@@ -177,7 +177,7 @@ fn parse_stream_with_lexer(lexer: &mut Lexer, r: &Resolve) -> Result<PdfStream> 
                 Some(&Primitive::Reference (reference)) => r.resolve(reference)?.as_integer()?,
                 Some(&Primitive::Integer (n)) => n,
                 Some(other) => err!(PdfError::UnexpectedPrimitive {expected: "Integer or Reference", found: other.get_debug_name()}),
-                None => err!(PdfError::MissingEntry {typ: "<Dictionary>", key: "Length"}),
+                None => err!(PdfError::MissingEntry {typ: "<Dictionary>", field: "Length".into()}),
             };
 
             

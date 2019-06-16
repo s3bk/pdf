@@ -29,7 +29,7 @@ pub struct Dictionary {
 }
 impl Dictionary {
     pub fn new() -> Dictionary {
-        Dictionary { dict: BTreeMap::new() }
+        Dictionary { dict: BTreeMap::new()}
     }
     pub fn len(&self) -> usize {
         self.dict.len()
@@ -51,12 +51,16 @@ impl Dictionary {
             Some(ty) => {
                 let ty = ty.to_name()?;
                 if ty != value {
-                    Err(PdfError::KeyValueMismatch { key, value, found: ty });
+                    Err(PdfError::KeyValueMismatch {
+                        key: key.into(),
+                        value: value.into(),
+                        found: ty.into()
+                    })
                 } else {
                     Ok(())
                 }
             },
-            None if required => Err(PdfError::EntryNotFound { key }),
+            None if required => Err(PdfError::MissingEntry { typ: "<Dictionary>", field: key.into() }),
             None => Ok(())
         }
     }
@@ -110,7 +114,7 @@ impl Object for PdfStream {
         out.write_all(&self.data)?;
         writeln!(out, "\nendstream")
     }
-    fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
+    fn from_primitive(p: Primitive, resolve: &dyn Resolve) -> Result<Self> {
         match p {
             Primitive::Stream (stream) => Ok(stream),
             Primitive::Reference (r) => PdfStream::from_primitive(resolve.resolve(r)?, resolve),
@@ -141,8 +145,8 @@ impl fmt::Debug for PdfString {
         for &b in &self.data {
             match b {
                 b'"' => write!(f, "\\\"")?,
-                b' ' ... b'~' => write!(f, "{}", b as char)?,
-                o @ 0 ... 7  => write!(f, "\\{}", o)?,
+                b' ' ..= b'~' => write!(f, "{}", b as char)?,
+                o @ 0 ..= 7  => write!(f, "\\{}", o)?,
                 x => write!(f, "\\x{:02x}", x)?
             }
         }
@@ -162,7 +166,7 @@ impl Object for PdfString {
         }
         Ok(())
     }
-    fn from_primitive(p: Primitive, _: &Resolve) -> Result<Self> {
+    fn from_primitive(p: Primitive, _: &dyn Resolve) -> Result<Self> {
         match p {
             Primitive::String (string) => Ok(string),
             _ => unexpected_primitive!(String, p.get_debug_name()),
@@ -239,7 +243,7 @@ impl Primitive {
         }
     }
     /// Doesn't accept a Reference
-    pub fn to_array(self, _r: &Resolve) -> Result<Vec<Primitive>> {
+    pub fn to_array(self, _r: &dyn Resolve) -> Result<Vec<Primitive>> {
         match self {
             Primitive::Array(v) => Ok(v),
             // Primitive::Reference(id) => r.resolve(id)?.to_array(r),
@@ -247,7 +251,7 @@ impl Primitive {
         }
     }
     /// Doesn't accept a Reference
-    pub fn to_dictionary(self, _r: &Resolve) -> Result<Dictionary> {
+    pub fn to_dictionary(self, _r: &dyn Resolve) -> Result<Dictionary> {
         match self {
             Primitive::Dictionary(dict) => Ok(dict),
             // Primitive::Reference(id) => r.resolve(id)?.to_dictionary(r),
@@ -269,7 +273,7 @@ impl Primitive {
         }
     }
     /// Doesn't accept a Reference
-    pub fn to_stream(self, _r: &Resolve) -> Result<PdfStream> {
+    pub fn to_stream(self, _r: &dyn Resolve) -> Result<PdfStream> {
         match self {
             Primitive::Stream (s) => Ok(s),
             // Primitive::Reference (id) => r.resolve(id)?.to_stream(r),
@@ -333,13 +337,13 @@ impl<T: Object> Object for Option<T> {
         // handle Options. 
         unimplemented!();
     }
-    fn from_primitive(p: Primitive, r: &Resolve) -> Result<Self> {
+    fn from_primitive(p: Primitive, r: &dyn Resolve) -> Result<Self> {
         match p {
             Primitive::Null => Ok(None),
             p => match T::from_primitive(p, r) {
                 Ok(p) => Ok(Some(p)),
                 // References to non-existing objects ought not to be an error
-                Err(PdfError::NullRef {..}, _) => Ok(None),
+                Err(PdfError::NullRef {..}) => Ok(None),
                 Err(e) => Err(e),
             }
         }
@@ -357,7 +361,7 @@ impl Object for DateTime<FixedOffset> {
         // TODO: smal/avg amount of work.
         unimplemented!();
     }
-    fn from_primitive(p: Primitive, _: &Resolve) -> Result<Self> {
+    fn from_primitive(p: Primitive, _: &dyn Resolve) -> Result<Self> {
         use chrono::{NaiveDateTime, NaiveDate, NaiveTime};
         match p {
             Primitive::String (PdfString {data}) => {

@@ -44,7 +44,7 @@ pub enum StreamFilter {
     CCITTFaxDecode
 }
 impl StreamFilter {
-    pub fn from_kind_and_params(kind: &str, params: Dictionary, r: &Resolve) -> Result<StreamFilter> {
+    pub fn from_kind_and_params(kind: &str, params: Dictionary, r: &dyn Resolve) -> Result<StreamFilter> {
        let params = Primitive::Dictionary (params);
        Ok(
        match kind {
@@ -63,9 +63,9 @@ impl StreamFilter {
 
 fn decode_nibble(c: u8) -> Option<u8> {
     match c {
-        n @ b'0' ... b'9' => Some(n - b'0'),
-        a @ b'a' ... b'h' => Some(a - b'a' + 0xa),
-        a @ b'A' ... b'H' => Some(a - b'A' + 0xA),
+        n @ b'0' ..= b'9' => Some(n - b'0'),
+        a @ b'a' ..= b'h' => Some(a - b'a' + 0xa),
+        a @ b'A' ..= b'H' => Some(a - b'A' + 0xA),
         _ => None
     }
 }
@@ -85,7 +85,7 @@ fn decode_hex(data: &[u8]) -> Result<Vec<u8>> {
 #[inline]
 fn sym_85(byte: u8) -> Option<u8> {
     match byte {
-        b @ 0x21 ... 0x75 => Some(b - 0x21),
+        b @ 0x21 ..= 0x75 => Some(b - 0x21),
         _ => None
     }
 }

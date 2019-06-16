@@ -100,7 +100,7 @@ impl<'a> Iterator for PagesIterator<'a> {
         // grab one item. it may or may not point to a valid index
         while let Some((tree, pos)) = self.stack.pop() {
             if pos < tree.kids.len() {
-                // push the next index on the stack ...
+                // push the next index on the stack ..=
                 self.stack.push((tree, pos+1));
                 
                 match tree.kids[pos] {
@@ -300,7 +300,7 @@ impl Object for XRefStream {
     fn serialize<W: io::Write>(&self, _out: &mut W) -> io::Result<()> {
         unimplemented!();
     }
-    fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
+    fn from_primitive(p: Primitive, resolve: &dyn Resolve) -> Result<Self> {
         let stream = p.to_stream(resolve)?;
         let info = XRefInfo::from_primitive(Primitive::Dictionary (stream.info), resolve)?;
         let data = stream.data.clone();

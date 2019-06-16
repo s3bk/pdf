@@ -259,7 +259,7 @@ fn impl_object_for_enum(ast: &DeriveInput, variants: &Vec<Variant>) -> quote::To
                     }
                 )
             }
-            fn from_primitive(p: Primitive, _resolve: &Resolve) -> Result<Self> {
+            fn from_primitive(p: Primitive, _resolve: &dyn Resolve) -> Result<Self> {
                 #from_primitive_code
             }
         }
@@ -271,23 +271,20 @@ fn impl_from_name(ast: &syn::DeriveInput, variants: &Vec<Variant>) -> quote::Tok
     let id = &ast.ident;
     let parts: Vec<quote::Tokens> = variants.iter().map(|var| {
         quote! {
-            stringify!(#var) => #id::#var,
+            stringify!(#var) => Ok(#id::#var),
         }
     }).collect();
     quote! {
-        Ok(
         match p {
-            Primitive::Name (name) => {
+            Primitive::Name(name) => {
                 match name.as_str() {
                     #( #parts )*
-                    s => return Err(::pdf::PdfError::UnknownVariant { id: stringify!(#id), name: s }),
+                    s => Err(::pdf::PdfError::UnknownVariant { id: stringify!(#id), name: s.to_string() }),
                 }
             }
-            _ => return Err(::pdf::PdfError::UnexpectedPrimitive { expected: "Name", found: p.get_debug_name() }),
+            _ => Err(::pdf::PdfError::UnexpectedPrimitive { expected: "Name", found: p.get_debug_name() }),
         }
-        )
     }
-
 }
 
 /// Accepts Dictionary to construct a struct
@@ -338,7 +335,7 @@ fn impl_object_for_struct(ast: &DeriveInput, fields: &[Field]) -> quote::Tokens 
                 writeln!(out, ">>")?;
                 Ok(())
             }
-            fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
+            fn from_primitive(p: Primitive, resolve: &dyn Resolve) -> Result<Self> {
                 #from_primitive_code
             }
         }
@@ -375,7 +372,7 @@ fn impl_object_for_stream(ast: &DeriveInput, fields: &[Field]) -> quote::Tokens 
                 Ok(())
                 */
             }
-            fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
+            fn from_primitive(p: Primitive, resolve: &dyn Resolve) -> Result<Self> {
                 let ::pdf::primitive::PdfStream {info, data}
                     = p.to_stream(resolve)?;
 
@@ -393,7 +390,7 @@ fn impl_object_for_stream(ast: &DeriveInput, fields: &[Field]) -> quote::Tokens 
 /// (`let name = ...;`,
 ///  `    name: name`)
 /// 
-fn impl_parts(fields: &[Field]) -> (Vec<quote::Tokens>, Vec<quote::Tokens>) {
+fn impl_parts(fields: &[Field], typ: &str) -> (Vec<quote::Tokens>, Vec<quote::Tokens>) {
     (fields.iter().map(|field| {
         let (key, default, skip) = field_attrs(field);
         if skip {
@@ -403,7 +400,6 @@ fn impl_parts(fields: &[Field]) -> (Vec<quote::Tokens>, Vec<quote::Tokens>) {
 
         let ty = field.ty.clone();
 
-
         if let Some(ref default) = default {
             let default = syn::parse_token_trees(&default).expect("Could not parse `default` code as Rust.");
             quote! {
@@ -411,7 +407,12 @@ fn impl_parts(fields: &[Field]) -> (Vec<quote::Tokens>, Vec<quote::Tokens>) {
                     let primitive: Option<::pdf::primitive::Primitive>
                         = dict.remove(#key);
                     let x: #ty = match primitive {
-                        Some(primitive) => <#ty as Object>::from_primitive(primitive, resolve).chain_err( || stringify!(#name) )?,
+                        Some(primitive) => <#ty as Object>::from_primitive(primitive, resolve).map_err(|e| 
+                            ::pdf::PdfError::FromPrimitive {
+                                typ: #typ,
+                                field: stringify!(#name),
+                                source: Box::new(e)
+                            })?,
                         None => #( #default )*,
                     };
                     x
@@ -424,10 +425,10 @@ fn impl_parts(fields: &[Field]) -> (Vec<quote::Tokens>, Vec<quote::Tokens>) {
                         Some(primitive) =>
                             match <#ty as Object>::from_primitive(primitive, resolve) {
                                 Ok(obj) => obj,
-                                Err(e) => return Err(::pdf::PdfError::FromPrimitiveError {
+                                Err(e) => return Err(::pdf::PdfError::FromPrimitive {
                                     typ: stringify!(#ty),
                                     field: stringify!(#name),
-                                    error: Box::new(e)
+                                    source: Box::new(e)
                                 })
                             }
                         None =>  // Try to construct T from Primitive::Null
@@ -435,7 +436,7 @@ fn impl_parts(fields: &[Field]) -> (Vec<quote::Tokens>, Vec<quote::Tokens>) {
                                 Ok(obj) => obj,
                                 Err(_) => return Err(::pdf::PdfError::MissingEntry {
                                     typ: stringify!(#ty),
-                                    field: stringify!(#name),
+                                    field: String::from(stringify!(#name)),
                                 })
                             },
                     }
@@ -457,9 +458,7 @@ fn impl_from_dict(ast: &DeriveInput, fields: &[Field]) -> quote::Tokens {
     let name = &ast.ident;
     let attrs = GlobalAttrs::from_ast(&ast);
     
-    
-    
-    let (let_parts, field_parts) = impl_parts(&fields);
+    let (let_parts, field_parts) = impl_parts(&fields, name.as_ref());
 
     let checks: Vec<_> = attrs.checks.iter().map(|&(ref key, ref val)|
         quote! {

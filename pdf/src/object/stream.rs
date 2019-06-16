@@ -19,7 +19,7 @@ impl<I: Object> Object for Stream<I> {
     /// Write object as a byte stream
     fn serialize<W: io::Write>(&self, _: &mut W) -> io::Result<()> {unimplemented!()}
     /// Convert primitive to Self
-    fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
+    fn from_primitive(p: Primitive, resolve: &dyn Resolve) -> Result<Self> {
         let PdfStream {info, data} = PdfStream::from_primitive(p, resolve)?;
         let info = StreamInfo::<I>::from_primitive(Primitive::Dictionary (info), resolve)?;
         Ok(Stream {
@@ -109,11 +109,11 @@ impl<T: Object> Object for StreamInfo<T> {
     fn serialize<W: io::Write>(&self, _out: &mut W) -> io::Result<()> {
         unimplemented!();
     }
-    fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
+    fn from_primitive(p: Primitive, resolve: &dyn Resolve) -> Result<Self> {
         let mut dict = Dictionary::from_primitive(p, resolve)?;
 
         let _length = usize::from_primitive(
-            dict.remove("Length").ok_or(PdfError::EntryNotFound{key:"Length"})?,
+            dict.remove("Length").ok_or(PdfError::MissingEntry{ typ: "SteamInfo", field: "Length".into() })?,
             resolve)?;
 
         let filters = Vec::<String>::from_primitive(
@@ -209,7 +209,7 @@ impl Object for ObjectStream {
     fn serialize<W: io::Write>(&self, _out: &mut W) -> io::Result<()> {
         unimplemented!();
     }
-    fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<ObjectStream> {
+    fn from_primitive(p: Primitive, resolve: &dyn Resolve) -> Result<ObjectStream> {
         let PdfStream {info, mut data} = PdfStream::from_primitive(p, resolve)?;
         let mut info = StreamInfo::<ObjStmInfo>::from_primitive(Primitive::Dictionary (info), resolve)?;
         decode_fully(&mut data, &mut info.filters)?;
