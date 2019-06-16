@@ -64,7 +64,7 @@ impl<'a> StringLexer<'a> {
 
                     _ => {
                         self.back()?;
-                        let start = self.get_offset();
+                        let _start = self.get_offset();
                         let mut char_code: u8 = 0;
                         
                         // A character code must follow. 1-3 numbers.
