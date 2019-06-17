@@ -74,10 +74,23 @@ impl<'a> Lexer<'a> {
     // TODO ^ backward case is actually not tested or.. thought about that well.
     fn next_word(&self, forward: bool) -> Result<(Substr<'a>, usize)> {
         let mut pos = self.pos;
+        
         // Move away from eventual whitespace
         while self.is_whitespace(pos) {
             pos = self.advance_pos(pos, forward)?;
         }
+        
+        while self.buf[pos] == b'%' {
+            if let Some(off) = self.buf[pos+1..].iter().position(|&b| b == b'\n') {
+                pos += off+2;
+            }
+            
+            // Move away from eventual whitespace
+            while self.is_whitespace(pos) {
+                pos = self.advance_pos(pos, forward)?;
+            }
+        }
+        
         let start_pos = pos;
 
         // If first character is delimiter, this lexeme only contains that character.
@@ -285,20 +298,7 @@ impl<'a> Lexer<'a> {
     }
 
     fn is_delimiter(&self, pos: usize) -> bool {
-        if pos >= self.buf.len() {
-            false
-        } else {
-            self.buf[pos] == b'(' ||
-            self.buf[pos] == b')' ||
-            self.buf[pos] == b'<' ||
-            self.buf[pos] == b'>' ||
-            self.buf[pos] == b'[' ||
-            self.buf[pos] == b']' ||
-            self.buf[pos] == b'{' ||
-            self.buf[pos] == b'}' ||
-            self.buf[pos] == b'/' ||
-            self.buf[pos] == b'%'
-        }
+        self.buf.get(pos).map(|b| b"()<>[]{}/%".contains(&b)).unwrap_or(false)
     }
 }
 

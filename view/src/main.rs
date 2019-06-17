@@ -161,12 +161,12 @@ fn render_page(page: &Page) -> Scene {
             }
             "gs" => { // set from graphic state dictionary
             },
-            "sc" => { // fill color
+            "sc" | "rg" => { // fill color
                 ops!(ops, r, g, b => {
                     canvas.set_fill_style(rgb2fill(r, g, b));
                 });
             }
-            "SC" => { // stroke color
+            "SC" | "RG" => { // stroke color
                 ops!(ops, r, g, b => {
                     canvas.set_stroke_style(rgb2fill(r, g, b));
                 });

@@ -195,9 +195,9 @@ impl GlobalAttrs {
                                     let mut value = value.value();
                                     attrs.type_required = if value.ends_with("?") {
                                         value.pop(); // remove '?'
-                                        true
-                                    } else {
                                         false
+                                    } else {
+                                        true
                                     };
                                     attrs.type_name = Some(value);
                                 },
