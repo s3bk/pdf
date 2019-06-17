@@ -185,6 +185,7 @@ pub struct GraphicsStateParameters {
 }
 
 #[derive(Debug)]
+#[pdf(is_stream)]
 pub enum XObject {
     Postscript (PostScriptXObject),
     Image (ImageXObject),
@@ -198,8 +199,8 @@ impl Object for XObject {
     }
     fn from_primitive(p: Primitive, resolve: &dyn Resolve) -> Result<Self> {
         let mut stream = PdfStream::from_primitive(p, resolve)?;
-        stream.info.expect("Type", "XObject", true)?;
-
+        stream.info.expect("Type", "XObject", false)?;
+        
         let subty = stream.info.get("Subtype")
             .ok_or(PdfError::MissingEntry { typ: "XObject", field: "Subtype".into()})?.clone()
             .to_name()?;

@@ -1,5 +1,6 @@
 #![allow(non_camel_case_types)]  /* TODO temporary becaues of pdf_derive */
 #![allow(unused_doc_comments)] // /* TODO temporary because of err.rs */
+#![feature(custom_attribute)]
 
 #[macro_use]
 extern crate pdf_derive;
@@ -28,9 +29,9 @@ pub mod parser;
 mod enc;
 
 // pub use content::*;
-use error::*;
+pub use error::PdfError;
 
 // hack to use ::pdf::object::Object in the derive
-mod pdf {
+pub mod pdf {
     pub use super::*;
 }

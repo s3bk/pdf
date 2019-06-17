@@ -46,10 +46,10 @@ impl Dictionary {
     pub fn remove(&mut self, key: &str) -> Option<Primitive> {
         self.dict.remove(key)
     }
-    pub fn expect(&mut self, key: &str, value: &str, required: bool) -> Result<()> {
-        match self.dict.remove(key) {
+    pub fn expect(&self, key: &str, value: &str, required: bool) -> Result<()> {
+        match self.dict.get(key) {
             Some(ty) => {
-                let ty = ty.to_name()?;
+                let ty = ty.as_name()?;
                 if ty != value {
                     Err(PdfError::KeyValueMismatch {
                         key: key.into(),
@@ -214,14 +214,12 @@ impl Primitive {
             Primitive::Name (..) => "Name",
         }
     }
-    /// Doesn't accept a Reference (contrary to i32::from_primitive())
     pub fn as_integer(&self) -> Result<i32> {
         match *self {
             Primitive::Integer(n) => Ok(n),
             ref p => unexpected_primitive!(Integer, p.get_debug_name())
         }
     }
-    /// Doesn't accept a Reference
     pub fn as_number(&self) -> Result<f32> {
         match *self {
             Primitive::Integer(n) => Ok(n as f32),
@@ -229,11 +227,16 @@ impl Primitive {
             ref p => unexpected_primitive!(Number, p.get_debug_name())
         }
     }
-    /// Doesn't accept a Reference
     pub fn as_bool(&self) -> Result<bool> {
         match *self {
             Primitive::Boolean (b) => Ok(b),
             ref p => unexpected_primitive!(Number, p.get_debug_name())
+        }
+    }
+    pub fn as_name(&self) -> Result<&str> {
+        match self {
+            Primitive::Name(ref name) => Ok(name.as_str()),
+            p => unexpected_primitive!(Name, p.get_debug_name())
         }
     }
     pub fn to_reference(self) -> Result<PlainRef> {

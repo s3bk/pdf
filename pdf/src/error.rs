@@ -48,14 +48,14 @@ pub enum PdfError {
     
     //////////////////
     // Dictionary
-    #[snafu(display("Can't parse field {} of struct {} due to: {}", field, typ, source))]
+    #[snafu(display("Can't parse field {} of struct {}.", field, typ))]
     FromPrimitive {
         typ: &'static str,
         field: &'static str,
         source: Box<PdfError>
     },
     
-    #[snafu(display("Field {} is missing in dictionary for type {}.", field, typ))]
+    #[snafu(display("Field /{} is missing in dictionary for type {}.", field, typ))]
     MissingEntry {
         typ: &'static str,
         field: String
@@ -99,12 +99,24 @@ pub enum PdfError {
     #[snafu(display("Entry {} in xref table unspecified", id))]
     UnspecifiedXRefEntry {id: ObjNr},
     
-    #[snafu(display("IO Error: {}", source))]
+    #[snafu(display("IO Error"))]
     Io { source: io::Error },
     
     #[snafu(display("{}", msg))]
     Other { msg: String }
 }
+impl PdfError {
+    pub fn trace(&self) {
+        trace(self, 0);
+    }
+}
+fn trace(err: &dyn Error, depth: usize) {
+    println!("{}: {}", depth, err);
+    if let Some(source) = err.cause() {
+        trace(source, depth+1);
+    }
+}
+    
 
 pub type Result<T> = std::result::Result<T, PdfError>;
 
