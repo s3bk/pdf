@@ -8,3 +8,6 @@ edition = "2018"
 
 [dependencies]
 pdf = { path = "../pdf" }
+pathfinder_geometry = { path = "../../pathfinder/geometry" }
+pathfinder_canvas = { path = "../../pathfinder/canvas" }
+pathfinder_renderer = { path = "../../pathfinder/renderer" }

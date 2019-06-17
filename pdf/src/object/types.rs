@@ -514,12 +514,12 @@ pub struct Outlines {
     pub count:  usize
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct Rect {
     pub left:   f32,
+    pub bottom: f32,
     pub right:  f32,
     pub top:    f32,
-    pub bottom: f32
 }
 impl Object for Rect {
     fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
@@ -532,9 +532,9 @@ impl Object for Rect {
         }
         Ok(Rect {
             left:   arr[0].as_number()?,
-            right:  arr[1].as_number()?,
-            top:    arr[2].as_number()?,
-            bottom: arr[3].as_number()?
+            bottom: arr[1].as_number()?,
+            right:  arr[2].as_number()?,
+            top:    arr[3].as_number()?
         })
     }
 }
