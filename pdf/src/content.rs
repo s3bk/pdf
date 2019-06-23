@@ -1,7 +1,7 @@
 /// PDF content streams.
 use std;
 use std::fmt::{Display, Formatter};
-use std::mem::swap;
+use std::mem::replace;
 use std::io;
 
 use error::*;
@@ -18,12 +18,12 @@ pub struct Operation {
 }
 
 impl Operation {
-	pub fn new(operator: String, operands: Vec<Primitive>) -> Operation {
-		Operation{
-			operator: operator,
-			operands: operands,
-		}
-	}
+    pub fn new(operator: String, operands: Vec<Primitive>) -> Operation {
+        Operation{
+            operator: operator,
+            operands: operands,
+        }
+    }
 }
 
 
@@ -35,6 +35,12 @@ pub struct Content {
 
 impl Content {
     fn parse_from(data: &[u8], resolve: &dyn Resolve) -> Result<Content> {
+        {
+            use std::io::Write;
+            let mut f = std::fs::OpenOptions::new().write(true).append(true).open("/tmp/content.txt").unwrap();
+            writeln!(f, "\n~~~~~~~~~~~\n");
+            f.write_all(data).unwrap();
+        }
         let mut lexer = Lexer::new(data);
 
         let mut content = Content {operations: Vec::new()};
@@ -52,9 +58,8 @@ impl Content {
                     // It's not an object/operand - treat it as an operator.
                     lexer.set_pos(backup_pos);
                     let operator = lexer.next()?.to_string();
-                    let mut operation = Operation::new(operator, Vec::new());
+                    let mut operation = Operation::new(operator, replace(&mut buffer, Vec::new()));
                     // Give operands to operation and empty buffer.
-                    swap(&mut buffer, &mut operation.operands);
                     content.operations.push(operation.clone());
                 }
             }
@@ -73,9 +78,20 @@ impl Object for Content {
     fn serialize<W: io::Write>(&self, _out: &mut W) -> io::Result<()> {unimplemented!()}
     /// Convert primitive to Self
     fn from_primitive(p: Primitive, resolve: &dyn Resolve) -> Result<Self> {
-        let PdfStream {info, mut data} = PdfStream::from_primitive(p, resolve)?;
-        let mut info = StreamInfo::<()>::from_primitive(Primitive::Dictionary (info), resolve)?;
-        decode_fully(&mut data, &mut info.filters)?;
+        type ContentStream = Stream<()>;
+        
+        let data = match p {
+            Primitive::Array(parts) => {
+                let mut content_data = Vec::new();
+                for p in parts {
+                    content_data.extend(&ContentStream::from_primitive(p, resolve)?.data);
+                }
+                content_data
+            }
+            p => {
+                ContentStream::from_primitive(p, resolve)?.data
+            }
+        };
         Content::parse_from(&data, resolve)
     }
 }

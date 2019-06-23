@@ -4,6 +4,11 @@ use std::io;
 use object::*;
 use error::*;
 use content::Content;
+use font::Font;
+use file::File;
+use backend::Backend;
+use std::rc::Rc;
+use std::ops::Deref;
 
 /// Node in a page tree - type is either `Page` or `PageTree`
 #[derive(Debug)]
@@ -24,6 +29,18 @@ impl Object for PagesNode {
             "Page" => Ok(PagesNode::Leaf (Page::from_primitive(Primitive::Dictionary(dict), r)?)),
             "Pages" => Ok(PagesNode::Tree (PageTree::from_primitive(Primitive::Dictionary(dict), r)?)),
             other => Err(PdfError::WrongDictionaryType {expected: "Page or Pages".into(), found: other.into()}),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PageRc(pub Rc<PagesNode>);
+impl Deref for PageRc {
+    type Target = Page;
+    fn deref(&self) -> &Page {
+        match *self.0 {
+            PagesNode::Leaf(ref page) => page,
+            _ => panic!("PageRc that isn't a Page")
         }
     }
 }
@@ -70,7 +87,7 @@ pub struct PageTree {
     #[pdf(key="Parent")]
     pub parent: Option<Ref<PageTree>>,
     #[pdf(key="Kids")]
-    pub kids:   Vec<PagesNode>,
+    pub kids:   Vec<Ref<PagesNode>>,
     #[pdf(key="Count")]
     pub count:  i32,
 
@@ -79,10 +96,14 @@ pub struct PageTree {
     // Note about inheritance..= if we wanted to 'inherit' things at the time of reading, we would
     // want Option<Ref<Resources>> here most likely.
     #[pdf(key="Resources")]
-    pub resources: Option<Resources>,
+    pub resources: Option<Ref<Resources>>,
+    
+    #[pdf(key="MediaBox")]
+    pub media_box:  Option<Rect>,
+    
+    #[pdf(key="CropBox")]
+    pub crop_box:   Option<Rect>,
 }
-
-
 
 #[derive(Object, Debug)]
 pub struct Page {
@@ -90,7 +111,7 @@ pub struct Page {
     pub parent: Ref<PageTree>,
 
     #[pdf(key="Resources")]
-    pub resources: Option<Resources>,
+    pub resources: Option<Ref<Resources>>,
     
     #[pdf(key="MediaBox")]
     pub media_box:  Option<Rect>,
@@ -102,7 +123,20 @@ pub struct Page {
     pub trim_box:   Option<Rect>,
     
     #[pdf(key="Contents")]
-    pub contents:   Vec<Content>
+    pub contents:   Option<Content>
+}
+fn inherit<T, F, B: Backend>(mut parent: Ref<PageTree>, file: &File<B>, f: F) -> Result<Option<T>>
+    where F: Fn(Rc<PageTree>) -> Option<Result<T>>
+{
+    loop {
+        let page_tree = file.deref(parent)?;
+        
+        match (page_tree.parent, f(page_tree)) {
+            (_, Some(t)) => break Ok(Some(t?)),
+            (Some(p), None) => parent = p,
+            (None, None) => break Ok(None)
+        }
+    }
 }
 
 impl Page {
@@ -113,7 +147,30 @@ impl Page {
             crop_box:   None,
             trim_box:   None,
             resources:  None,
-            contents:   Vec::new(),
+            contents:   None
+        }
+    }
+    pub fn media_box<B: Backend>(&self, file: &File<B>) -> Result<Rect> {
+        match self.media_box {
+            Some(b) => Ok(b),
+            None => inherit(self.parent, file, |pt| pt.media_box.map(|b| Ok(b)))?
+                .ok_or_else(|| PdfError::MissingEntry { typ: "Page", field: "MediaBox".into() })
+        }
+    }
+    pub fn crop_box<B: Backend>(&self, file: &File<B>) -> Result<Rect> {
+        match self.crop_box {
+            Some(b) => Ok(b),
+            None => match inherit(self.parent, file, |pt| pt.crop_box.map(|b| Ok(b)))? {
+                Some(b) => Ok(b),
+                None => self.media_box(file)
+            }
+        }
+    }
+    pub fn resources<B: Backend>(&self, file: &File<B>) -> Result<Rc<Resources>> {
+        match self.resources {
+            Some(r) => file.deref(r),
+            None => inherit(self.parent, file, |pt| pt.resources.map(|r| file.deref(r)))?
+                .ok_or_else(|| PdfError::MissingEntry { typ: "Page", field: "Resources".into() })
         }
     }
 }
@@ -130,7 +187,7 @@ pub struct PageLabel {
     start:  Option<usize>
 }
 
-#[derive(Object, Debug)]
+#[derive(Object, Debug, Clone)]
 pub struct Resources {
     #[pdf(key="ExtGState")]
     pub ext_g_state: Option<GraphicsStateParameters>,
@@ -143,74 +200,26 @@ pub struct Resources {
     #[pdf(key="Font")]
     pub fonts: Option<BTreeMap<String, Font>>,
 }
-
-#[derive(Debug)]
-pub enum Font {
-    Type0,
-    Type1,
-    MMType1,
-    Type3,
-    TrueType,
-    CIDFontType0,
-    CIDFontType2,
-}
-impl Object for Font {
-    fn serialize<W: io::Write>(&self, _out: &mut W) -> io::Result<()> { unimplemented!() }
-    fn from_primitive(p: Primitive, resolve: &dyn Resolve) -> Result<Self> {
-        let mut dict = Dictionary::from_primitive(p, resolve)?;
-        dict.expect("Type", "Font", true)?;
-        
-        match dict.get("Subtype") {
-            Some(&Primitive::Name(ref name)) =>
-                Ok(match name.as_str() {
-                    "Type0" => Font::Type0,
-                    "Type1" => Font::Type1,
-                    "MMType1" => Font::MMType1,
-                    "Type3" => Font::Type3,
-                    "TrueType" => Font::TrueType,
-                    "CIDFontType0" => Font::CIDFontType0,
-                    "CIDFontType2" => Font::CIDFontType2,
-                    s => bail!("Wrong /Type {} for font dictionary.", s),
-                }),
-            _ => err!(PdfError::MissingEntry {typ: "Font", field: "Subtype".into()}),
-        }
+impl Resources {
+    pub fn fonts(&self) -> impl Iterator<Item=(&str, &Font)> {
+        self.fonts.iter().flat_map(|b| b.iter()).map(|(k, v)| (k.as_str(), v))
     }
 }
 
-#[derive(Object, Debug)]
+#[derive(Object, Debug, Clone)]
 #[pdf(Type = "ExtGState?")]
 /// `ExtGState`
 pub struct GraphicsStateParameters {
     //TODO
 }
 
-#[derive(Debug)]
+#[derive(Object, Debug, Clone)]
 #[pdf(is_stream)]
 pub enum XObject {
+    #[pdf(name="PS")]
     Postscript (PostScriptXObject),
     Image (ImageXObject),
     Form (FormXObject),
-}
-
-impl Object for XObject {
-    // Subtype==Image => ImageDictionary
-    fn serialize<W: io::Write>(&self, _out: &mut W) -> io::Result<()> {
-        unimplemented!();
-    }
-    fn from_primitive(p: Primitive, resolve: &dyn Resolve) -> Result<Self> {
-        let mut stream = PdfStream::from_primitive(p, resolve)?;
-        stream.info.expect("Type", "XObject", false)?;
-        
-        let subty = stream.info.get("Subtype")
-            .ok_or(PdfError::MissingEntry { typ: "XObject", field: "Subtype".into()})?.clone()
-            .to_name()?;
-        Ok(match subty.as_str() {
-            "PS" => XObject::Postscript (PostScriptXObject::from_primitive(Primitive::Stream(stream), resolve)?),
-            "Image" => XObject::Image (ImageXObject::from_primitive(Primitive::Stream(stream), resolve)?),
-            "Form" => XObject::Form (FormXObject::from_primitive(Primitive::Stream(stream), resolve)?),
-            s => bail!("XObject: invalid /Subtype {}", s),
-        })
-    }
 }
 
 /// A variant of XObject
@@ -220,14 +229,11 @@ pub type ImageXObject = Stream<ImageDict>;
 /// A variant of XObject
 pub type FormXObject = Stream<FormDict>;
 
-#[derive(Object, Debug)]
+#[derive(Object, Debug, Clone)]
 #[pdf(Type="XObject", Subtype="PS")]
 pub struct PostScriptDict {
     // TODO
 }
-
-
-
 
 #[derive(Object, Debug, Clone)]
 #[pdf(Type="XObject", Subtype="Image")]
@@ -289,7 +295,7 @@ pub enum RenderingIntent {
 }
 
 
-#[derive(Object, Debug)]
+#[derive(Object, Debug, Clone)]
 #[pdf(Type="XObject", Subtype="Form")]
 pub struct FormDict {
     // TODO

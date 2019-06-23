@@ -5,7 +5,7 @@ use std::ops::{Index, Range};
 use object::{PlainRef, Resolve, Object};
 use chrono::{DateTime, FixedOffset};
 use std::ops::Deref;
-
+use std::convert::TryInto;
 
 
 #[derive(Clone, Debug)]
@@ -46,7 +46,18 @@ impl Dictionary {
     pub fn remove(&mut self, key: &str) -> Option<Primitive> {
         self.dict.remove(key)
     }
-    pub fn expect(&self, key: &str, value: &str, required: bool) -> Result<()> {
+    /// like remove, but takes the name of the calling type and returns `PdfError::MissingEntry` if the entry is not found
+    pub fn require(&mut self, typ: &'static str, key: &str) -> Result<Primitive> {
+        self.remove(key).ok_or(
+            PdfError::MissingEntry {
+                typ,
+                field: key.into()
+            }
+        )
+    }
+    /// assert that the given key/value pair is in the dictionary (`required=true`),
+    /// or the key is not present at all (`required=false`)
+    pub fn expect(&self, typ: &'static str, key: &str, value: &str, required: bool) -> Result<()> {
         match self.dict.get(key) {
             Some(ty) => {
                 let ty = ty.as_name()?;
@@ -60,7 +71,7 @@ impl Dictionary {
                     Ok(())
                 }
             },
-            None if required => Err(PdfError::MissingEntry { typ: "<Dictionary>", field: key.into() }),
+            None if required => Err(PdfError::MissingEntry { typ, field: key.into() }),
             None => Ok(())
         }
     }
@@ -141,7 +152,7 @@ pub struct PdfString {
 }
 impl fmt::Debug for PdfString {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "b\"")?;
+        write!(f, "\"")?;
         for &b in &self.data {
             match b {
                 b'"' => write!(f, "\\\"")?,
@@ -150,7 +161,7 @@ impl fmt::Debug for PdfString {
                 x => write!(f, "\\x{:02x}", x)?
             }
         }
-        write!(f, "b\"")
+        write!(f, "\"")
     }
 }
 impl Object for PdfString {
@@ -239,6 +250,13 @@ impl Primitive {
             p => unexpected_primitive!(Name, p.get_debug_name())
         }
     }
+    /// Does accept a Reference
+    pub fn as_array(&self) -> Result<&[Primitive]> {
+        match self {
+            Primitive::Array(ref v) => Ok(v),
+            p => unexpected_primitive!(Array, p.get_debug_name())
+        }
+    }
     pub fn to_reference(self) -> Result<PlainRef> {
         match self {
             Primitive::Reference(id) => Ok(id),
@@ -253,11 +271,10 @@ impl Primitive {
             p => unexpected_primitive!(Array, p.get_debug_name())
         }
     }
-    /// Doesn't accept a Reference
-    pub fn to_dictionary(self, _r: &dyn Resolve) -> Result<Dictionary> {
+    pub fn to_dictionary(self, r: &dyn Resolve) -> Result<Dictionary> {
         match self {
             Primitive::Dictionary(dict) => Ok(dict),
-            // Primitive::Reference(id) => r.resolve(id)?.to_dictionary(r),
+            Primitive::Reference(id) => r.resolve(id)?.to_dictionary(r),
             p => unexpected_primitive!(Dictionary, p.get_debug_name())
         }
     }
@@ -331,7 +348,25 @@ impl From<String> for Primitive {
         Primitive::Name (x)
     }
 }
-
+impl<'a> TryInto<f32> for &'a Primitive {
+    type Error = PdfError;
+    fn try_into(self) -> Result<f32> {
+        self.as_number()
+    }
+}
+impl<'a> TryInto<&'a str> for &'a Primitive {
+    type Error = PdfError;
+    fn try_into(self) -> Result<&'a str> {
+        match self {
+            Primitive::Name(ref s) => Ok(s),
+            Primitive::String(ref s) => Ok(s.as_str()?),
+            ref p => Err(PdfError::UnexpectedPrimitive {
+                expected: "Name or String",
+                found: p.get_debug_name()
+            })
+        }
+    }
+}
 
 impl<T: Object> Object for Option<T> {
     fn serialize<W: io::Write>(&self, _out: &mut W) -> io::Result<()> {

@@ -117,47 +117,58 @@ pub fn object(input: TokenStream) -> TokenStream {
     impl_object(&ast)
 }
 
+#[derive(Default)]
 struct FieldAttrs {
-    key: LitStr,
-    default: Option<Expr>
+    key: Option<LitStr>,
+    default: Option<LitStr>,
+    name: Option<LitStr>,
+    skip: bool
 }
-
-/// Returns None if the field is to be skipped
-fn field_attrs(field: &Field) -> Option<FieldAttrs> {
-    field.attrs.iter()
-    .filter_map(|attr| {
-        if attr.path.is_ident("pdf") {
+impl FieldAttrs {
+    fn new() -> FieldAttrs {
+        FieldAttrs {
+            key: None,
+            default: None,
+            name: None,
+            skip: false
+        }
+    }
+    fn key(&self) -> &LitStr {
+        self.key.as_ref().expect("no 'key' in field attributes")
+    }
+    fn name(&self) -> &LitStr {
+        self.name.as_ref().expect("no 'name' in field attributes")
+    }
+    fn default(&self) -> Option<Expr> {
+        self.default.as_ref().map(|s| parse_str(&s.value()).expect("can't parse `default` as EXPR"))
+    }
+    fn parse(list: &[Attribute]) -> FieldAttrs {
+        let mut attrs = FieldAttrs::new();
+        for attr in list.iter().filter(|attr| attr.path.is_ident("pdf")) {
             let list = match attr.parse_meta() {
                 Ok(Meta::List(list)) => list,
                 Ok(_) => panic!("only #[pdf(attrs...)] is allowed"),
                 Err(e) => panic!("can't parse meta attributes: {}", e)
             };
-            let (mut key, mut default, mut skip) = (None, None, false);
             for meta in list.nested.iter() {
                 match *meta {
-                    NestedMeta::Meta(Meta::NameValue(MetaNameValue { ref ident, lit: Lit::Str(ref value), ..}))
-                    if ident == "key"
-                        => key = Some(value.clone()),
-                    NestedMeta::Meta(Meta::NameValue(MetaNameValue { ref ident, lit: Lit::Str(ref value), ..}))
-                    if ident == "default"
-                        => default = Some(value.clone()),
+                    NestedMeta::Meta(Meta::NameValue(MetaNameValue { ref ident, lit: Lit::Str(ref value), ..})) => {
+                        match ident.to_string().as_str() {
+                            "key" => attrs.key = Some(value.clone()),
+                            "default" => attrs.default = Some(value.clone()),
+                            "name" => attrs.name = Some(value.clone()),
+                            id => panic!("unsupported key {}", id)
+                        }
+                    },
                     NestedMeta::Meta(Meta::Word(ref ident))
                     if ident == "skip"
-                        => skip = true,
+                        => attrs.skip = true,
                     _ => panic!(r##"Derive error - Supported derive attributes: `key="Key"`, `default="some code"`."##)
                 }
             }
-            Some(match skip {
-                true => None,
-                false => Some(FieldAttrs {
-                    key: key.expect("attr `key` missing"),
-                    default: default.map(|s| parse_str(&s.value()).expect("can't parse `default` as EXPR"))
-                }),
-            })
-        } else {
-            None 
         }
-    }).next().expect("no pdf meta attribute")
+        attrs
+    }
 }
 
 
@@ -235,62 +246,62 @@ fn impl_object_for_enum(ast: &DeriveInput, data: &DataEnum) -> SynStream {
     let id = &ast.ident;
     let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
 
-    let ser_code: Vec<_> = data.variants.iter().map(|var| {
-        quote! {
-            #id::#var => stringify!(#id::#var),
-        }
+    let pairs: Vec<_> = data.variants.iter().map(|var| {
+        let attrs = FieldAttrs::parse(&var.attrs);
+        let var_ident = &var.ident;
+        let name = attrs.name.map(|lit| lit.value()).unwrap_or_else(|| var.ident.to_string());
+        (name, quote! { #id::#var_ident })
     }).collect();
+    
+    let ser_code = pairs.iter().map(|(name, var)| {
+        quote! {
+            #var => #name
+        }
+    });
 
-    let from_primitive_code = impl_from_name(id, data);
+    let parts = pairs.iter().map(|(name, var)| {
+        quote! {
+            #name => Ok(#var)
+        }
+    });
+    
     quote! {
         impl #impl_generics crate::object::Object for #id #ty_generics #where_clause {
             fn serialize<W: ::std::io::Write>(&self, out: &mut W) -> ::std::io::Result<()> {
                 writeln!(out, "/{}",
                     match *self {
-                        #( #ser_code )*
+                        #( #ser_code, )*
                     }
                 )
             }
             fn from_primitive(p: Primitive, _resolve: &dyn Resolve) -> Result<Self> {
-                #from_primitive_code
-            }
-        }
-    }
-}
-
-/// Returns code for from_primitive that accepts Name
-fn impl_from_name(id: &Ident, data: &DataEnum) -> SynStream {
-    let parts: Vec<_> = data.variants.iter().map(|var| {
-        quote! {
-            stringify!(#var) => Ok(#id::#var),
-        }
-    }).collect();
-    quote! {
-        match p {
-            Primitive::Name(name) => {
-                match name.as_str() {
-                    #( #parts )*
-                    s => Err(crate::PdfError::UnknownVariant { id: stringify!(#id), name: s.to_string() }),
+                match p {
+                    Primitive::Name(name) => {
+                        match name.as_str() {
+                            #( #parts, )*
+                            s => Err(crate::PdfError::UnknownVariant { id: stringify!(#id), name: s.to_string() }),
+                        }
+                    }
+                    _ => Err(crate::PdfError::UnexpectedPrimitive { expected: "Name", found: p.get_debug_name() }),
                 }
             }
-            _ => Err(crate::PdfError::UnexpectedPrimitive { expected: "Name", found: p.get_debug_name() }),
         }
     }
 }
 
 fn impl_enum_from_stream(ast: &DeriveInput, data: &DataEnum, attrs: &GlobalAttrs) -> SynStream {
     let id = &ast.ident;
-    
     let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
 
     let ty_check = match (&attrs.type_name, attrs.type_required) {
         (Some(ref ty), required) => quote! {
-            stream.info.expect("Type", #ty, #required)?;
+            stream.info.expect(stringify!(#id), "Type", #ty, #required)?;
         },
         (None, _) => quote!{}
     };
     
     let variants_code: Vec<_> = data.variants.iter().map(|var| {
+        let attrs = FieldAttrs::parse(&var.attrs);
         let inner_ty = match var.fields {
             Fields::Unnamed(ref fields) => {
                 assert_eq!(fields.unnamed.len(), 1, "all variants in a stream enum have to have exactly one unnamed field");
@@ -298,8 +309,10 @@ fn impl_enum_from_stream(ast: &DeriveInput, data: &DataEnum, attrs: &GlobalAttrs
             },
             _ => panic!("all variants in a stream enum have to have exactly one unnamed field")
         };
+        let name = attrs.name.map(|lit| lit.value()).unwrap_or_else(|| var.ident.to_string());
+        let variant_ident = &var.ident;
         quote! {
-            stringify!(#var) => Ok(#id::#var ( #inner_ty::from_primitive(Primitive::Stream(stream), resolve)?)),
+            #name => Ok(#id::#variant_ident ( #inner_ty::from_primitive(Primitive::Stream(stream), resolve)?))
         }
     }).collect();
     
@@ -316,9 +329,9 @@ fn impl_enum_from_stream(ast: &DeriveInput, data: &DataEnum, attrs: &GlobalAttrs
                     .ok_or(PdfError::MissingEntry { typ: stringify!(#id), field: "Subtype".into()})?
                     .as_name()?;
                 
-                match subty.as_str() {
-                    #( #variants_code ),*
-                    s => Err(crate::PdfError::UnknownVariant { id: stringify!(#id), variant: s.into() })
+                match subty {
+                    #( #variants_code, )*
+                    s => Err(crate::PdfError::UnknownVariant { id: stringify!(#id), name: s.into() })
                 }
             }
         }
@@ -327,27 +340,27 @@ fn impl_enum_from_stream(ast: &DeriveInput, data: &DataEnum, attrs: &GlobalAttrs
 
 /// Accepts Dictionary to construct a struct
 fn impl_object_for_struct(ast: &DeriveInput, fields: &Fields) -> SynStream {
-    let name = &ast.ident;
+    let id = &ast.ident;
     let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
     let attrs = GlobalAttrs::from_ast(&ast);
 
     let parts: Vec<_> = fields.iter()
     .map(|field| {
-        (field.ident.clone(), field_attrs(field))
+        (field.ident.clone(), FieldAttrs::parse(&field.attrs))
     }).collect();
     
     // Implement serialize()
     let fields_ser = parts.iter()
     .map( |&(ref field, ref attrs)|
-        if let Some(attrs) = attrs.as_ref() {
-            let ref key = attrs.key;
+        if attrs.skip {
+            quote!()
+        } else {
+            let key = attrs.key();
             quote! {
                 write!(out, "{} ", #key)?;
                 self.#field.serialize(out)?;
                 writeln!(out, "")?;
             }
-        } else {
-            quote!()
         }
     );
     let checks_code = attrs.checks.iter().map(|&(ref key, ref val)|
@@ -357,17 +370,18 @@ fn impl_object_for_struct(ast: &DeriveInput, fields: &Fields) -> SynStream {
     );
 
     ///////////////////////
-    let typ = name.to_string();
+    let typ = id.to_string();
     let let_parts = fields.iter().map(|field| {
-        let FieldAttrs { default, key } = match field_attrs(field) {
-            Some(attrs) => attrs,
-            None => return quote! {}
-        };
+        let attrs = FieldAttrs::parse(&field.attrs);
+        if attrs.skip {
+            return quote! {}
+        }
+        let key = attrs.key();
         let ref name = field.ident;
 
         let ty = field.ty.clone();
 
-        if let Some(ref default) = default {
+        if let Some(ref default) = attrs.default() {
             quote! {
                 let #name = {
                     let primitive: Option<crate::primitive::Primitive>
@@ -420,13 +434,13 @@ fn impl_object_for_struct(ast: &DeriveInput, fields: &Fields) -> SynStream {
     
     let checks: Vec<_> = attrs.checks.iter().map(|&(ref key, ref val)|
         quote! {
-            dict.expect(#key, #val, true)?;
+            dict.expect(#typ, #key, #val, true)?;
         }
     ).collect();
 
     let ty_check = match (&attrs.type_name, attrs.type_required) {
         (Some(ref ty), required) => quote! {
-            dict.expect("Type", #ty, #required)?;
+            dict.expect(#typ, "Type", #ty, #required)?;
         },
         (None, _) => quote!{}
     };
@@ -437,7 +451,7 @@ fn impl_object_for_struct(ast: &DeriveInput, fields: &Fields) -> SynStream {
         #ty_check
         #( #checks )*
         #( #let_parts )*
-        Ok(#name {
+        Ok(#id {
             #( #field_parts )*
         })
     };
@@ -448,7 +462,7 @@ fn impl_object_for_struct(ast: &DeriveInput, fields: &Fields) -> SynStream {
     };
     
     quote! {
-        impl #impl_generics crate::object::Object for #name #ty_generics #where_clause {
+        impl #impl_generics crate::object::Object for #id #ty_generics #where_clause {
             fn serialize<W: ::std::io::Write>(&self, out: &mut W) -> ::std::io::Result<()> {
                 writeln!(out, "<<")?;
                 #pdf_type
@@ -466,7 +480,7 @@ fn impl_object_for_struct(ast: &DeriveInput, fields: &Fields) -> SynStream {
 
 /// Note: must have info and dict (TODO explain in docs)
 fn impl_object_for_stream(ast: &DeriveInput, fields: &Fields) -> SynStream {
-    let name = &ast.ident;
+    let id = &ast.ident;
     let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
 
     let info_ty = fields.iter()
@@ -483,7 +497,7 @@ fn impl_object_for_stream(ast: &DeriveInput, fields: &Fields) -> SynStream {
     }).next().unwrap();
 
     quote! {
-        impl #impl_generics crate::object::Object for #name #ty_generics #where_clause {
+        impl #impl_generics crate::object::Object for #id #ty_generics #where_clause {
             fn serialize<W: ::std::io::Write>(&self, _out: &mut W) -> ::std::io::Result<()> {
                 unimplemented!();
                 /*
@@ -498,7 +512,7 @@ fn impl_object_for_stream(ast: &DeriveInput, fields: &Fields) -> SynStream {
                 let crate::primitive::PdfStream {info, data}
                     = p.to_stream(resolve)?;
 
-                Ok(#name {
+                Ok(#id {
                     info: <#info_ty as Object>::from_primitive(crate::primitive::Primitive::Dictionary (info), resolve)?,
                     data: data,
                 })

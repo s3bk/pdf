@@ -17,6 +17,7 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::collections::BTreeMap;
 
+
 pub type ObjNr = u64;
 pub type GenNr = u16;
 pub trait Resolve: {
@@ -67,11 +68,21 @@ impl Object for PlainRef {
 
 
 // NOTE: Copy & Clone implemented manually ( https://github.com/rust-lang/rust/issues/26925 )
-#[derive(Copy,Clone)]
+
 pub struct Ref<T> {
     inner:      PlainRef,
     _marker:    PhantomData<T>
 }
+impl<T> Clone for Ref<T> {
+    fn clone(&self) -> Ref<T> {
+        Ref {
+            inner: self.inner,
+            _marker: PhantomData
+        }
+    }
+}
+impl<T> Copy for Ref<T> {}
+
 impl<T> Ref<T> {
     pub fn new(inner: PlainRef) -> Ref<T> {
         Ref {
@@ -87,6 +98,11 @@ impl<T> Ref<T> {
     }
     pub fn get_inner(&self) -> PlainRef {
         self.inner
+    }
+}
+impl<T: Object> Ref<T> {
+    pub fn resolve(&self, r: &dyn Resolve) -> Result<T> {
+        T::from_primitive(r.resolve(self.inner)?, r)
     }
 }
 impl<T: Object> Object for Ref<T> {
@@ -196,6 +212,7 @@ impl<T: Object> Object for Vec<T> {
             Primitive::Null => {
                 Vec::new()
             }
+            Primitive::Reference(id) => Self::from_primitive(r.resolve(id)?, r)?,
             _ => vec![T::from_primitive(p, r)?]
         }
         )

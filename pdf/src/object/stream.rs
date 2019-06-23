@@ -7,12 +7,18 @@ use enc::decode;
 
 use std::io;
 use std::ops::Deref;
+use std::fmt;
 
 /// Simple Stream object with only some additional entries from the stream dict (I).
-#[derive(Debug,Clone)]
-pub struct Stream<I: Object> {
+#[derive(Clone)]
+pub struct Stream<I: Object=()> {
     pub info: StreamInfo<I>,
     pub data: Vec<u8>,
+}
+impl<I: Object + fmt::Debug> fmt::Debug for Stream<I> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        self.info.info.fmt(f)
+    }
 }
 
 impl<I: Object> Object for Stream<I> {
@@ -20,23 +26,14 @@ impl<I: Object> Object for Stream<I> {
     fn serialize<W: io::Write>(&self, _: &mut W) -> io::Result<()> {unimplemented!()}
     /// Convert primitive to Self
     fn from_primitive(p: Primitive, resolve: &dyn Resolve) -> Result<Self> {
-        let PdfStream {info, data} = PdfStream::from_primitive(p, resolve)?;
+        let PdfStream {info, mut data} = PdfStream::from_primitive(p, resolve)?;
         let info = StreamInfo::<I>::from_primitive(Primitive::Dictionary (info), resolve)?;
-        Ok(Stream {
-            info: info,
-            data: data,
-        })
-    }
-}
-
-impl<I: Object> Stream<I> {
-    pub fn decode(&mut self) -> Result<()> {
-        for filter in &self.info.filters {
-            eprintln!("Decode filter: {:?}", filter);
-            self.data = decode(&self.data, filter)?;
+        
+        for filter in &info.filters {
+            data = decode(&data, filter)?;
         }
-        self.info.filters.clear();
-        Ok(())
+        
+        Ok(Stream { info, data })
     }
 }
 

@@ -80,7 +80,7 @@ impl<'a> Lexer<'a> {
             pos = self.advance_pos(pos, forward)?;
         }
         
-        while self.buf[pos] == b'%' {
+        while self.buf.get(pos) == Some(&b'%') {
             if let Some(off) = self.buf[pos+1..].iter().position(|&b| b == b'\n') {
                 pos += off+2;
             }

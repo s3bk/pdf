@@ -6,9 +6,12 @@ use std::marker::PhantomData;
 use std::collections::HashMap;
 use error::*;
 use object::*;
-use xref::{XRefTable};
+use xref::{XRefTable, XRef};
 use primitive::{Primitive, Dictionary, PdfString};
 use backend::Backend;
+use std::rc::Rc;
+use any::Any;
+use std::cell::RefCell;
 
 pub struct PromisedRef<T> {
     inner:      PlainRef,
@@ -25,100 +28,13 @@ impl<'a, T> Into<Ref<T>> for &'a PromisedRef<T> {
     }
 }
 
-// tail call
-fn find_page<'a>(pages: &'a PageTree, mut offset: i32, page_nr: i32) -> Result<&'a Page> {
-    for kid in &pages.kids {
-        // println!("{}/{} {:?}", offset, page_nr, kid);
-        match *kid {
-            PagesNode::Tree(ref t) => {
-                if offset + t.count < page_nr {
-                    offset += t.count;
-                } else {
-                    return find_page(t, offset, page_nr);
-                }
-            },
-            PagesNode::Leaf(ref p) => {
-                if offset < page_nr {
-                    offset += 1;
-                } else {
-                    assert_eq!(offset, page_nr);
-                    return Ok(p);
-                }
-            }
-        }
-    }
-    Err(PdfError::PageNotFound {page_nr: page_nr})
-}
-fn scan_pages<F: FnMut(&Page)>(pages: &PageTree, mut offset: i32, handler: &mut F) -> Result<()> {
-    for kid in &pages.kids {
-        match *kid {
-            PagesNode::Tree(ref t) => {
-                scan_pages(t, offset, handler)?;
-            },
-            PagesNode::Leaf(ref p) => {
-                offset += 1;
-                handler(p);
-            }
-        }
-    }
-    Ok(())
-}
-    
-// tail call to trick borrowck
-fn update_pages(pages: &mut PageTree, mut offset: i32, page_nr: i32, page: Page) -> Result<()>  {
-    for kid in &mut pages.kids.iter_mut() {
-        // println!("{}/{} {:?}", offset, page_nr, kid);
-        match *kid {
-            PagesNode::Tree(ref mut t) => {
-                if offset + t.count < page_nr {
-                    offset += t.count;
-                } else {
-                    return update_pages(t, offset, page_nr, page);
-                }
-            },
-            PagesNode::Leaf(ref mut p) => {
-                if offset < page_nr {
-                    offset += 1;
-                } else {
-                    assert_eq!(offset, page_nr);
-                    *p = page;
-                    return Ok(());
-                }
-            }
-        }
-        
-    }
-    Err(PdfError::PageNotFound {page_nr: page_nr})
-}
-
-pub struct PagesIterator<'a> {
-    stack: Vec<(&'a PageTree, usize)> // points to nodes that have not been processed yet
-}
-impl<'a> Iterator for PagesIterator<'a> {
-    type Item = &'a Page;
-    fn next(&mut self) -> Option<&'a Page> {
-        // grab one item. it may or may not point to a valid index
-        while let Some((tree, pos)) = self.stack.pop() {
-            if pos < tree.kids.len() {
-                // push the next index on the stack ..=
-                self.stack.push((tree, pos+1));
-                
-                match tree.kids[pos] {
-                    PagesNode::Tree(ref child) => self.stack.push((child, 0)), // push the child on the stack
-                    PagesNode::Leaf(ref page) => return Some(page)
-                }
-            }
-        }
-
-        None
-    }
-}
 
 pub struct File<B: Backend> {
     backend:    B,
     trailer:    Trailer,
     refs:       XRefTable,
-    changes:    HashMap<ObjNr, Primitive>
+    changes:    HashMap<ObjNr, Primitive>,
+    cache:      RefCell<HashMap<PlainRef, Any>>
 }
 
 impl<B: Backend> File<B> {
@@ -127,7 +43,8 @@ impl<B: Backend> File<B> {
             backend:    b,
             trailer:    Trailer::default(),
             refs:       XRefTable::new(1), // the root object,
-            changes:    HashMap::new()
+            changes:    HashMap::new(),
+            cache:      RefCell::new(HashMap::new())
         }
     }
 
@@ -145,7 +62,8 @@ impl<B: Backend> File<B> {
             backend:    backend,
             trailer:    trailer,
             refs:       refs,
-            changes:    HashMap::new()
+            changes:    HashMap::new(),
+            cache:      RefCell::new(HashMap::new())
         })
     }
 
@@ -161,21 +79,76 @@ impl<B: Backend> File<B> {
         }
     }
 
-    pub fn deref<T: Object>(&self, r: Ref<T>) -> Result<T> {
-        let primitive = self.resolve(r.get_inner())?;
-        T::from_primitive(primitive, &|id| self.resolve(id))
+    pub fn deref<T>(&self, r: Ref<T>) -> Result<Rc<T>>
+        where T: Object + 'static
+    {
+        use std::collections::hash_map::Entry;
+        match self.cache.borrow_mut().entry(r.get_inner()) {
+            Entry::Occupied(e) => {
+                Ok(e.get().clone().downcast().expect("wrong type"))
+            },
+            Entry::Vacant(mut e) => {
+                let primitive = self.resolve(r.get_inner())?;
+                let obj = T::from_primitive(primitive, &|id| self.resolve(id))?;
+                let rc = Rc::new(obj);
+                e.insert(Any::new(rc.clone()));
+                Ok(rc)
+            }
+        }
     }
-    pub fn pages(&self) -> PagesIterator {
-        PagesIterator { stack: vec![(&self.get_root().pages, 0)] }
+    fn walk_pagetree(&self, pos: &mut usize, tree: Ref<PagesNode>, func: &mut impl FnMut(usize, &Page)) -> Result<()> {
+        match *(self.deref(tree)?) {
+            PagesNode::Tree(ref child) => {
+                for &k in &child.kids {
+                    self.walk_pagetree(pos, k, func);
+                }
+            },
+            PagesNode::Leaf(ref page) => {
+                func(*pos, page);
+                *pos += 1;
+            }
+        }
+        Ok(())
+    }
+    pub fn pages(&self, mut func: impl FnMut(usize, &Page)) {
+        for &k in &self.get_root().pages.kids {
+            self.walk_pagetree(&mut 0, k, &mut func);
+        }
     }
     pub fn get_num_pages(&self) -> Result<i32> {
         Ok(self.trailer.root.pages.count)
     }
-    pub fn get_page(&self, n: i32) -> Result<&Page> {
+    
+    // tail call
+    fn find_page(&self, pages: &PageTree, mut offset: i32, page_nr: i32) -> Result<PageRc> {
+        for &kid in &pages.kids {
+            // println!("{}/{} {:?}", offset, page_nr, kid);
+            let rc = self.deref(kid)?;
+            match *rc {
+                PagesNode::Tree(ref t) => {
+                    if offset + t.count < page_nr {
+                        offset += t.count;
+                    } else {
+                        return self.find_page(t, offset, page_nr);
+                    }
+                },
+                PagesNode::Leaf(ref p) => {
+                    if offset < page_nr {
+                        offset += 1;
+                    } else {
+                        assert_eq!(offset, page_nr);
+                        return Ok(PageRc(rc));
+                    }
+                }
+            }
+        }
+        Err(PdfError::PageNotFound {page_nr: page_nr})
+    }
+    pub fn get_page(&self, n: i32) -> Result<PageRc> {
         if n >= self.get_num_pages()? {
             return Err(PdfError::PageOutOfBounds {page_nr: n, max: self.get_num_pages()?});
         }
-        find_page(&self.trailer.root.pages, 0, n)
+        self.find_page(&self.trailer.root.pages, 0, n)
     }
 
     /*
@@ -204,12 +177,36 @@ impl<B: Backend> File<B> {
         });
         images
     }
-    */
     
-    // From earlier attempts
-    /*
+    // tail call to trick borrowck
+    fn update_pages(&self, pages: &mut PageTree, mut offset: i32, page_nr: i32, page: Page) -> Result<()>  {
+        for kid in &mut pages.kids.iter_mut() {
+            // println!("{}/{} {:?}", offset, page_nr, kid);
+            match *(self.deref(kid)?) {
+                PagesNode::Tree(ref mut t) => {
+                    if offset + t.count < page_nr {
+                        offset += t.count;
+                    } else {
+                        return self.update_pages(t, offset, page_nr, page);
+                    }
+                },
+                PagesNode::Leaf(ref mut p) => {
+                    if offset < page_nr {
+                        offset += 1;
+                    } else {
+                        assert_eq!(offset, page_nr);
+                        *p = page;
+                        return Ok(());
+                    }
+                }
+            }
+            
+        }
+        Err(PdfError::PageNotFound {page_nr: page_nr})
+    }
+    
     pub fn update_page(&mut self, page_nr: i32, page: Page) -> Result<()> {
-        update_pages(&mut self.trailer.root.pages, 0, page_nr, page)
+        self.update_pages(&mut self.trailer.root.pages, 0, page_nr, page)
     }
     
     pub fn update(&mut self, id: ObjNr, primitive: Primitive) {
@@ -245,7 +242,7 @@ impl<B: Backend> File<B> {
         
         Ref::from_id(id)
     }
- */
+    */
 }
 
 

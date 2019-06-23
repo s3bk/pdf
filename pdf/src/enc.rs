@@ -70,7 +70,7 @@ fn decode_nibble(c: u8) -> Option<u8> {
     }
 }
 
-fn decode_hex(data: &[u8]) -> Result<Vec<u8>> {
+pub fn decode_hex(data: &[u8]) -> Result<Vec<u8>> {
     let mut out = Vec::with_capacity(data.len() / 2);
     for (i, (&high, &low)) in data.iter().tuples().enumerate() {
         if let (Some(low), Some(high)) = (decode_nibble(low), decode_nibble(high)) {

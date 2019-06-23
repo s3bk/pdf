@@ -1,6 +1,7 @@
 use object::ObjNr;
 use std::io;
 use std::error::Error;
+use std::process::Termination;
 
 #[derive(Debug, Snafu)]
 pub enum PdfError {
@@ -118,7 +119,7 @@ fn trace(err: &dyn Error, depth: usize) {
 }
     
 
-pub type Result<T> = std::result::Result<T, PdfError>;
+pub type Result<T, E=PdfError> = std::result::Result<T, E>;
 
 impl From<io::Error> for PdfError {
     fn from(source: io::Error) -> PdfError {
@@ -128,6 +129,12 @@ impl From<io::Error> for PdfError {
 impl From<String> for PdfError {
     fn from(msg: String) -> PdfError {
         PdfError::Other { msg }
+    }
+}
+impl Termination for PdfError {
+    fn report(self) -> i32 {
+        self.trace();
+        1
     }
 }
 macro_rules! err_from {
