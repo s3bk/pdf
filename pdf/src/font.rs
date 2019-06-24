@@ -16,6 +16,14 @@ bitflags! {
         const ForceBold     = 1 << 18;
     }
 }
+/*
+fn decode(flags: Flags, byte: u8) -> char {
+    if flags.contains(Flags::Nonsymbolic) {
+        // Adobe standard latin
+        
+    }
+    if flags.contains(Flags::Symbolic) {
+*/
 
 #[derive(Object, Debug, Copy, Clone)]
 pub enum FontType {
@@ -28,7 +36,7 @@ pub enum FontType {
     CIDFontType2,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Font {
     pub subtype: FontType,
     pub name: String,
@@ -84,20 +92,20 @@ impl Object for Font {
     }
 }
 impl Font {
-    pub fn data(&self) -> Option<&[u8]> {
+    pub fn data(&self) -> Option<Result<&[u8]>> {
         self.info.as_ref().and_then(|i| {
             if let Some(s) = i.font_descriptor.font_file3.as_ref() {
-                return Some(s.data.as_slice());
+                return Some(s.data());
             }
             match self.subtype {
-                FontType::Type1 => i.font_descriptor.font_file.as_ref().map(|s| s.data.as_slice()),
-                FontType::TrueType => i.font_descriptor.font_file2.as_ref().map(|s| s.data.as_slice()),
+                FontType::Type1 => i.font_descriptor.font_file.as_ref().map(|s| s.data()),
+                FontType::TrueType => i.font_descriptor.font_file2.as_ref().map(|s| s.data()),
                 _ => None
             }
         })
     }
 }
-#[derive(Object, Debug, Clone)]
+#[derive(Object, Debug)]
 pub struct TFont {
     #[pdf(key="Name")]
     name: Option<String>,
@@ -121,7 +129,7 @@ pub struct TFont {
     to_unicode: Option<Stream>
 }
 
-#[derive(Object, Debug, Clone)]
+#[derive(Object, Debug)]
 pub struct FontDescriptor {
     #[pdf(key="FontName")]
     font_name: String,
@@ -184,7 +192,7 @@ pub struct FontDescriptor {
     font_file3: Option<Stream<FontStream3>>,
     
     #[pdf(key="CharSet")]
-    char_set: Option<String>
+    char_set: Option<PdfString>
 }
 
 #[derive(Object, Debug, Clone)]

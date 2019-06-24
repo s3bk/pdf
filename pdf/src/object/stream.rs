@@ -3,37 +3,49 @@ use primitive::*;
 use error::*;
 use parser::Lexer;
 use enc::decode;
-
+use once_cell::unsync::OnceCell;
+use std::borrow::Cow;
 
 use std::io;
 use std::ops::Deref;
 use std::fmt;
 
+
+
 /// Simple Stream object with only some additional entries from the stream dict (I).
-#[derive(Clone)]
 pub struct Stream<I: Object=()> {
     pub info: StreamInfo<I>,
-    pub data: Vec<u8>,
+    raw_data: Vec<u8>,
+    decoded: OnceCell<Vec<u8>>
 }
+impl<I: Object + fmt::Debug> Stream<I> {
+    pub fn data(&self) -> Result<&[u8]> {
+        self.decoded.get_or_try_init(|| {
+            debug!("Stream Info: {:?}", &self.info);
+            let mut data = Cow::Borrowed(&*self.raw_data);
+            for filter in &self.info.filters {
+                data = decode(&*data, filter)?.into();
+            }
+            Ok(data.into_owned())
+        }).map(|v| v.as_slice())
+    }
+}
+        
 impl<I: Object + fmt::Debug> fmt::Debug for Stream<I> {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         self.info.info.fmt(f)
     }
 }
 
-impl<I: Object> Object for Stream<I> {
+impl<I: Object + fmt::Debug> Object for Stream<I> {
     /// Write object as a byte stream
     fn serialize<W: io::Write>(&self, _: &mut W) -> io::Result<()> {unimplemented!()}
     /// Convert primitive to Self
     fn from_primitive(p: Primitive, resolve: &dyn Resolve) -> Result<Self> {
-        let PdfStream {info, mut data} = PdfStream::from_primitive(p, resolve)?;
+        let PdfStream {info, data} = PdfStream::from_primitive(p, resolve)?;
         let info = StreamInfo::<I>::from_primitive(Primitive::Dictionary (info), resolve)?;
         
-        for filter in &info.filters {
-            data = decode(&data, filter)?;
-        }
-        
-        Ok(Stream { info, data })
+        Ok(Stream { info, raw_data: data, decoded: OnceCell::new() })
     }
 }
 

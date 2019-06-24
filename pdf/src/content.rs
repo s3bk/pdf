@@ -37,7 +37,12 @@ impl Content {
     fn parse_from(data: &[u8], resolve: &dyn Resolve) -> Result<Content> {
         {
             use std::io::Write;
-            let mut f = std::fs::OpenOptions::new().write(true).append(true).open("/tmp/content.txt").unwrap();
+            let mut f = std::fs::OpenOptions::new()
+                .write(true)
+                .append(true)
+                .create(true)
+                .open("/tmp/content.txt")
+                .unwrap();
             writeln!(f, "\n~~~~~~~~~~~\n");
             f.write_all(data).unwrap();
         }
@@ -80,19 +85,22 @@ impl Object for Content {
     fn from_primitive(p: Primitive, resolve: &dyn Resolve) -> Result<Self> {
         type ContentStream = Stream<()>;
         
-        let data = match p {
+        match p {
             Primitive::Array(parts) => {
                 let mut content_data = Vec::new();
                 for p in parts {
-                    content_data.extend(&ContentStream::from_primitive(p, resolve)?.data);
+                    content_data.extend(ContentStream::from_primitive(p, resolve)?.data()?);
                 }
-                content_data
+                Content::parse_from(&content_data, resolve)
             }
             p => {
-                ContentStream::from_primitive(p, resolve)?.data
+                Content::parse_from(
+                    ContentStream::from_primitive(p, resolve)?
+                        .data()?,
+                    resolve
+                )
             }
-        };
-        Content::parse_from(&data, resolve)
+        }
     }
 }
 

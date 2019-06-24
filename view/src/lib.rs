@@ -16,6 +16,7 @@ use pdf::object::*;
 use pdf::primitive::Primitive;
 use pdf::backend::Backend;
 use pdf::font::FontType;
+use pdf::content::Operation;
 
 use pathfinder_geometry::outline::{Contour, Outline};
 use pathfinder_geometry::basic::vector::Vector2F;
@@ -55,11 +56,105 @@ fn rgb2fill(r: f32, g: f32, b: f32) -> FillStyle {
     let c = |v: f32| (v * 255.) as u8;
     FillStyle::Color(ColorU { r: c(r), g: c(g), b: c(b), a: 255 })
 }
+fn gray2fill(g: f32) -> FillStyle {
+    rgb2fill(g, g, g)
+}
+fn cymk2fill(c: f32, y: f32, m: f32, k: f32) -> FillStyle {
+    rgb2fill(
+        (1.0 - c) * (1.0 - k),
+        (1.0 - m) * (1.0 - k),
+        (1.0 - y) * (1.0 - k)
+    )
+}
 
 #[derive(Clone)]
 struct FontEntry {
     font: Font,
     subtype: FontType
+}
+
+fn render_text<'a, I>(iter: & mut I, canvas: & mut CanvasRenderingContext2D, fonts: &'a HashMap<&'a str, FontEntry>, mut current_font: &'a FontEntry) 
+    where I: Iterator<Item=&'a Operation>
+{
+    let mut current_line = Vector2F::default();
+    let mut current_char = current_line;
+    let mut font_size = 0.0;
+    
+    while let Some(op) = iter.next() {
+        debug!("{}", op);
+        let ref ops = op.operands;
+        match op.operator.as_str() {
+            "ET" => break,
+            "Tf" => { // text font
+                ops!(ops, font: &str, size: f32 => {
+                    if let Some(e) = fonts.get(font) {
+                        canvas.set_font(e.font.clone());
+                        current_font = e;
+                        debug!("new font: {}", e.font.full_name());
+                    }
+                    canvas.set_font_size(size);
+                    font_size = size;
+                });
+            }
+            "Tj" => { // draw text
+                ops!(ops, text: &str => {
+                    canvas.fill_text(text, current_char + Vector2F::new(0.0, font_size));
+                    current_char = current_char + Vector2F::new(canvas.measure_text(text).width, 0.);
+                });
+            }
+            "TJ" => {
+                let arr = ops[0].as_array().expect("not an array");
+                let mut glyphs = Vec::new();
+                let mut advance = Vector2D::zero();
+                let font = FontRef::new(current_font.font.clone());
+                
+                debug!("current font: {}", current_font.font.full_name());
+                let scale = font_size / (current_font.font.metrics().units_per_em as f32);
+                for arg in arr {
+                    match arg {
+                        Primitive::String(ref data) => {
+                            for &b in data.as_bytes() {
+                                debug!("char: {} {}", b, b as char);
+                                if let Some(glyph_id) = current_font.font.glyph_for_char(b as char) {
+                                    glyphs.push(Glyph {
+                                        font: font.clone(),
+                                        glyph_id,
+                                        offset: advance
+                                    });
+                                    advance += current_font.font.advance(glyph_id).unwrap() * scale;
+                                }
+                            }
+                            //let advance = current_font.advance(b as u32).expect("can't get advance");
+                            //Vector2F::new(advance.x, advance.y) * 
+                            //transform = transform.post_transform(&Vector2F::new(canvas.measure_text(text).width, 0.));
+                        },
+                        p => {
+                            let offset = p.as_number().expect("wrong argument to TJ");
+                            advance.x -= font_size * 0.001 * offset; // because why not PDF…
+                        }
+                    }
+                }
+                let transform = Transform2DF::from_scale(Vector2F::new(1.0, -1.0))
+                    .post_mul(&Transform2DF::from_translation(current_line));
+                
+                canvas.fill_layout(&Layout {
+                    size: font_size,
+                    glyphs,
+                    advance
+                }, transform);
+                current_char = current_char + Vector2F::new(advance.x, advance.y);
+            },
+            "Td" => { // move current line
+                ops_p!(ops, t => {
+                    current_line = current_line + t;
+                    current_char = current_line;
+                });
+            },
+            _ => {}
+        }
+    }
+    
+    canvas.restore();
 }
 
 pub fn render_page<B: Backend>(file: &PdfFile<B>, page: &Page) -> Scene {
@@ -79,11 +174,15 @@ pub fn render_page<B: Backend>(file: &PdfFile<B>, page: &Page) -> Scene {
     
     let font = Font::from_path(font_path, 0).expect("can't open font");
     canvas.set_font(font.clone());
+    let default_font = FontEntry {
+        font,
+        subtype: FontType::TrueType
+    };
     
     let mut fonts = HashMap::new();
     for (name, font) in resources.fonts() {
         dbg!((&name, &font));
-        if let Some(data) = font.data() {
+        if let Some(Ok(data)) = font.data() {
             ::std::fs::File::create(&format!("/tmp/font_{}", name)).unwrap().write_all(data).unwrap();
             fonts.insert(
                 name,
@@ -98,15 +197,9 @@ pub fn render_page<B: Backend>(file: &PdfFile<B>, page: &Page) -> Scene {
     
     let mut path = Path2D::new();
     let mut last = Vector2F::default();
-    let mut current_line = Vector2F::default();
-    let mut current_char = current_line;
-    let mut font_size = 0.0;
-    let mut current_font = FontEntry {
-        font,
-        subtype: FontType::TrueType
-    };
     
-    for op in page.contents.iter().flat_map(|content| content.operations.iter()) {
+    let mut iter = page.contents.as_ref().expect("no contents").operations.iter();
+    while let Some(op) = iter.next() {
         debug!("{}", op);
         let ref ops = op.operands;
         match op.operator.as_str() {
@@ -207,78 +300,32 @@ pub fn render_page<B: Backend>(file: &PdfFile<B>, page: &Page) -> Scene {
             },
             "W" | "W*" => { // clipping path
             }
-            "sc" | "rg" => { // fill color
-                ops!(ops, r: f32, g: f32, b: f32 => {
-                    canvas.set_fill_style(rgb2fill(r, g, b));
-                });
-            }
             "SC" | "RG" => { // stroke color
                 ops!(ops, r: f32, g: f32, b: f32 => {
                     canvas.set_stroke_style(rgb2fill(r, g, b));
                 });
             }
-            "Tf" => { // text font
-                ops!(ops, font: &str, size: f32 => {
-                    if let Some(e) = fonts.get(font) {
-                        canvas.set_font(e.font.clone());
-                        current_font = e.clone();
-                        debug!("new font: {}", e.font.full_name());
-                    }
-                    canvas.set_font_size(size);
-                    font_size = size;
+            "sc" | "rg" => { // fill color
+                ops!(ops, r: f32, g: f32, b: f32 => {
+                    canvas.set_fill_style(rgb2fill(r, g, b));
                 });
             }
-            "Tj" => { // draw text
-                ops!(ops, text: &str => {
-                    canvas.fill_text(text, current_char + Vector2F::new(0.0, font_size));
-                    current_char = current_char + Vector2F::new(canvas.measure_text(text).width, 0.);
+            "G" => { // stroke gray
+                ops!(ops, gray: f32 => {
+                    canvas.set_stroke_style(gray2fill(gray));
+                })
+            }
+            "g" => { // stroke gray
+                ops!(ops, gray: f32 => {
+                    canvas.set_fill_style(gray2fill(gray));
+                })
+            }
+            "k" => { // fill color
+                ops!(ops, c: f32, y: f32, m: f32, k: f32 => {
+                    canvas.set_fill_style(cymk2fill(c, y, m, k));
                 });
             }
-            "TJ" => {
-                let arr = ops[0].as_array().expect("not an array");
-                let mut glyphs = Vec::new();
-                let mut advance = Vector2D::zero();
-                let font = FontRef::new(current_font.font.clone());
-                
-                debug!("current font: {}", current_font.font.full_name());
-                let scale = font_size / (current_font.font.metrics().units_per_em as f32);
-                for arg in arr {
-                    match arg {
-                        Primitive::String(ref data) => {
-                            for &b in data.as_bytes() {
-                                debug!("char: {} {}", b, b as char);
-                                if let Some(glyph_id) = current_font.font.glyph_for_char(b as char) {
-                                    glyphs.push(Glyph {
-                                        font: font.clone(),
-                                        glyph_id,
-                                        offset: advance
-                                    });
-                                    advance += current_font.font.advance(glyph_id).unwrap() * scale;
-                                }
-                            }
-                            //let advance = current_font.advance(b as u32).expect("can't get advance");
-                            //Vector2F::new(advance.x, advance.y) * 
-                            //transform = transform.post_transform(&Vector2F::new(canvas.measure_text(text).width, 0.));
-                        },
-                        p => {
-                            let offset = p.as_number().expect("wrong argument to TJ");
-                            advance.x -= 0.001 * offset; // because why not PDF…
-                        }
-                    }
-                }
-                canvas.fill_layout(&Layout {
-                    size: font_size,
-                    glyphs,
-                    advance
-                }, current_char);
-                current_char = current_char + Vector2F::new(advance.x, advance.y);
-            }
-            "Td" => { // move current line
-                ops_p!(ops, t => {
-                    current_line = current_line + t;
-                    current_char = current_line;
-                });
-            }
+            "BT" => render_text(&mut iter, &mut canvas, &fonts, &default_font),
             _ => {}
         }
     }

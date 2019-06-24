@@ -113,7 +113,7 @@ impl PdfError {
 }
 fn trace(err: &dyn Error, depth: usize) {
     println!("{}: {}", depth, err);
-    if let Some(source) = err.cause() {
+    if let Some(source) = err.source() {
         trace(source, depth+1);
     }
 }

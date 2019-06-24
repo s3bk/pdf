@@ -44,8 +44,9 @@ fn main() -> Result<(), PdfError> {
     gl_attributes.set_context_profile(GLProfile::Core);
     gl_attributes.set_context_version(3, 3);
 
+    let scale = 2.0;
     // Open a window.
-    let window_size = Vector2I::new(640, 480);
+    let window_size = Vector2I::new(1800, 1000);
     let window = video.window("Text example", window_size.x() as u32, window_size.y() as u32)
                       .opengl()
                       .build()

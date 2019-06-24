@@ -187,7 +187,7 @@ pub struct PageLabel {
     start:  Option<usize>
 }
 
-#[derive(Object, Debug, Clone)]
+#[derive(Object, Debug)]
 pub struct Resources {
     #[pdf(key="ExtGState")]
     pub ext_g_state: Option<GraphicsStateParameters>,
@@ -206,14 +206,14 @@ impl Resources {
     }
 }
 
-#[derive(Object, Debug, Clone)]
+#[derive(Object, Debug)]
 #[pdf(Type = "ExtGState?")]
 /// `ExtGState`
 pub struct GraphicsStateParameters {
     //TODO
 }
 
-#[derive(Object, Debug, Clone)]
+#[derive(Object, Debug)]
 #[pdf(is_stream)]
 pub enum XObject {
     #[pdf(name="PS")]
@@ -229,13 +229,13 @@ pub type ImageXObject = Stream<ImageDict>;
 /// A variant of XObject
 pub type FormXObject = Stream<FormDict>;
 
-#[derive(Object, Debug, Clone)]
+#[derive(Object, Debug)]
 #[pdf(Type="XObject", Subtype="PS")]
 pub struct PostScriptDict {
     // TODO
 }
 
-#[derive(Object, Debug, Clone)]
+#[derive(Object, Debug)]
 #[pdf(Type="XObject", Subtype="Image")]
 /// A variant of XObject
 pub struct ImageDict {
@@ -295,7 +295,7 @@ pub enum RenderingIntent {
 }
 
 
-#[derive(Object, Debug, Clone)]
+#[derive(Object, Debug)]
 #[pdf(Type="XObject", Subtype="Form")]
 pub struct FormDict {
     // TODO

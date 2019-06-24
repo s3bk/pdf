@@ -33,6 +33,8 @@ tuple = "0.4.0"
 glob = "0.2.11"
 chrono = "0.4.0"
 bitflags = "1.1"
+once_cell = "0.2"
+log = "*"
 
 [lib]
 doctest = false
