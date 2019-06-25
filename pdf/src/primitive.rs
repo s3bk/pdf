@@ -112,7 +112,7 @@ pub struct PdfStream {
     pub data: Vec<u8>,
 }
 impl Object for PdfStream {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()>  {
+    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()>  {
         writeln!(out, "<<")?;
         for (k, v) in &self.info {
             write!(out, "  {} ", k)?;
@@ -123,7 +123,8 @@ impl Object for PdfStream {
         
         writeln!(out, "stream")?;
         out.write_all(&self.data)?;
-        writeln!(out, "\nendstream")
+        writeln!(out, "\nendstream");
+        Ok(())
     }
     fn from_primitive(p: Primitive, resolve: &dyn Resolve) -> Result<Self> {
         match p {
@@ -165,7 +166,7 @@ impl fmt::Debug for PdfString {
     }
 }
 impl Object for PdfString {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
+    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()> {
         write!(out, r"\")?;
         for &b in &self.data {
             match b {
@@ -369,7 +370,7 @@ impl<'a> TryInto<&'a str> for &'a Primitive {
 }
 
 impl<T: Object> Object for Option<T> {
-    fn serialize<W: io::Write>(&self, _out: &mut W) -> io::Result<()> {
+    fn serialize<W: io::Write>(&self, _out: &mut W) -> Result<()> {
         // TODO: the Option here is most often or always about whether the entry exists in a
         // dictionary. Hence it should probably be more up to the Dictionary impl of serialize, to
         // handle Options. 
@@ -395,7 +396,7 @@ fn parse_or<T: str::FromStr + Clone>(buffer: &str, range: Range<usize>, default:
 }
 
 impl Object for DateTime<FixedOffset> {
-    fn serialize<W: io::Write>(&self, _out: &mut W) -> io::Result<()> {
+    fn serialize<W: io::Write>(&self, _out: &mut W) -> Result<()> {
         // TODO: smal/avg amount of work.
         unimplemented!();
     }

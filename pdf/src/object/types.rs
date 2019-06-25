@@ -17,7 +17,7 @@ pub enum PagesNode {
     Leaf (Page),
 }
 impl Object for PagesNode {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
+    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()> {
         match *self {
             PagesNode::Tree (ref t) => t.serialize(out),
             PagesNode::Leaf (ref l) => l.serialize(out),
@@ -310,7 +310,7 @@ pub enum Counter {
     AlphaLower
 }
 impl Object for Counter {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
+    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()> {
         let style_code = match *self {
             Counter::Arabic     => "D",
             Counter::RomanLower => "r",
@@ -343,7 +343,7 @@ pub struct NameTree<T> {
 }
 
 impl<T: Object> Object for NameTree<T> {
-    fn serialize<W: io::Write>(&self, _out: &mut W) -> io::Result<()> {
+    fn serialize<W: io::Write>(&self, _out: &mut W) -> Result<()> {
         unimplemented!();
     }
     fn from_primitive(p: Primitive, resolve: &dyn Resolve) -> Result<Self> {
@@ -497,7 +497,7 @@ pub struct EmbeddedFileParamDict {
 
 
 
-pub fn write_list<'a, W, T: 'a, I>(out: &mut W, mut iter: I) -> io::Result<()>
+pub fn write_list<'a, W, T: 'a, I>(out: &mut W, mut iter: I) -> Result<()>
     where W: io::Write, T: Object, I: Iterator<Item=&'a T>
 {
     write!(out, "[")?;
@@ -511,7 +511,8 @@ pub fn write_list<'a, W, T: 'a, I>(out: &mut W, mut iter: I) -> io::Result<()>
         }
     }
     
-    write!(out, "]")
+    write!(out, "]")?;
+    Ok(())
 }
 
 #[derive(Object)]
@@ -528,8 +529,9 @@ pub struct Rect {
     pub top:    f32,
 }
 impl Object for Rect {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
-        write!(out, "[{} {} {} {}]", self.left, self.top, self.right, self.bottom)
+    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()> {
+        write!(out, "[{} {} {} {}]", self.left, self.top, self.right, self.bottom)?;
+        Ok(())
     }
     fn from_primitive(p: Primitive, r: &dyn Resolve) -> Result<Self> {
         let arr = p.to_array(r)?;

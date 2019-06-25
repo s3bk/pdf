@@ -8,7 +8,6 @@ use error::*;
 use object::*;
 use parser::{Lexer, parse_with_lexer};
 use primitive::*;
-use object::decode_fully;
 
 /// Operation in a PDF content stream.
 #[derive(Debug, Clone)]
@@ -80,7 +79,7 @@ impl Content {
 
 impl Object for Content {
     /// Write object as a byte stream
-    fn serialize<W: io::Write>(&self, _out: &mut W) -> io::Result<()> {unimplemented!()}
+    fn serialize<W: io::Write>(&self, _out: &mut W) -> Result<()> {unimplemented!()}
     /// Convert primitive to Self
     fn from_primitive(p: Primitive, resolve: &dyn Resolve) -> Result<Self> {
         type ContentStream = Stream<()>;

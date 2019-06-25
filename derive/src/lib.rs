@@ -267,12 +267,13 @@ fn impl_object_for_enum(ast: &DeriveInput, data: &DataEnum) -> SynStream {
     
     quote! {
         impl #impl_generics crate::object::Object for #id #ty_generics #where_clause {
-            fn serialize<W: ::std::io::Write>(&self, out: &mut W) -> ::std::io::Result<()> {
+            fn serialize<W: ::std::io::Write>(&self, out: &mut W) -> Result<()> {
                 writeln!(out, "/{}",
                     match *self {
                         #( #ser_code, )*
                     }
-                )
+                )?;
+                Ok(())
             }
             fn from_primitive(p: Primitive, _resolve: &dyn Resolve) -> Result<Self> {
                 match p {
@@ -318,7 +319,7 @@ fn impl_enum_from_stream(ast: &DeriveInput, data: &DataEnum, attrs: &GlobalAttrs
     
     quote! {
         impl #impl_generics crate::object::Object for #id #ty_generics #where_clause {
-            fn serialize<W: ::std::io::Write>(&self, out: &mut W) -> ::std::io::Result<()> {
+            fn serialize<W: ::std::io::Write>(&self, out: &mut W) -> Result<()> {
                 unimplemented!();
             }
             fn from_primitive(p: Primitive, resolve: &dyn Resolve) -> Result<Self> {
@@ -463,7 +464,7 @@ fn impl_object_for_struct(ast: &DeriveInput, fields: &Fields) -> SynStream {
     
     quote! {
         impl #impl_generics crate::object::Object for #id #ty_generics #where_clause {
-            fn serialize<W: ::std::io::Write>(&self, out: &mut W) -> ::std::io::Result<()> {
+            fn serialize<W: ::std::io::Write>(&self, out: &mut W) -> Result<()> {
                 writeln!(out, "<<")?;
                 #pdf_type
                 #( #checks_code )*
@@ -498,7 +499,7 @@ fn impl_object_for_stream(ast: &DeriveInput, fields: &Fields) -> SynStream {
 
     quote! {
         impl #impl_generics crate::object::Object for #id #ty_generics #where_clause {
-            fn serialize<W: ::std::io::Write>(&self, _out: &mut W) -> ::std::io::Result<()> {
+            fn serialize<W: ::std::io::Write>(&self, _out: &mut W) -> Result<()> {
                 unimplemented!();
                 /*
                 writeln!(out, "<<")?;

@@ -39,7 +39,7 @@ impl<I: Object + fmt::Debug> fmt::Debug for Stream<I> {
 
 impl<I: Object + fmt::Debug> Object for Stream<I> {
     /// Write object as a byte stream
-    fn serialize<W: io::Write>(&self, _: &mut W) -> io::Result<()> {unimplemented!()}
+    fn serialize<W: io::Write>(&self, _: &mut W) -> Result<()> {unimplemented!()}
     /// Convert primitive to Self
     fn from_primitive(p: Primitive, resolve: &dyn Resolve) -> Result<Self> {
         let PdfStream {info, data} = PdfStream::from_primitive(p, resolve)?;
@@ -103,19 +103,20 @@ impl<I: Default> Default for StreamInfo<I> {
     }
 }
 impl<T> StreamInfo<T> {
+/*
     /// If the stream is not encoded, this is a no-op. `decode()` should be called whenever it's uncertain
     /// whether the stream is encoded.
     pub fn encode(&mut self, _filter: StreamFilter) {
         // TODO this should add the filter to `self.filters` and encode the data with the given
         // filter
         unimplemented!();
-    }
+    }*/
     pub fn get_filters(&self) -> &[StreamFilter] {
         &self.filters
     }
 }
 impl<T: Object> Object for StreamInfo<T> {
-    fn serialize<W: io::Write>(&self, _out: &mut W) -> io::Result<()> {
+    fn serialize<W: io::Write>(&self, _out: &mut W) -> Result<()> {
         unimplemented!();
     }
     fn from_primitive(p: Primitive, resolve: &dyn Resolve) -> Result<Self> {
@@ -175,18 +176,7 @@ impl<T: Object> Object for StreamInfo<T> {
     }
 }
 
-
-// TODO: Where should this go??
-/// Decode data with all filters (should be moved)
-pub fn decode_fully(data: &mut Vec<u8>, filters: &mut Vec<StreamFilter>) -> Result<()> {
-    for filter in filters.iter() {
-        *data = decode(&data, filter)?;
-    }
-    filters.clear();
-    Ok(())
-}
-
-#[derive(Object, Default)]
+#[derive(Object, Default, Debug)]
 #[pdf(Type = "ObjStm")]
 pub struct ObjStmInfo {
     #[pdf(key = "N")]
@@ -205,28 +195,25 @@ pub struct ObjStmInfo {
 
 
 pub struct ObjectStream {
-    info:       StreamInfo<ObjStmInfo>,
     /// Byte offset of each object. Index is the object number.
     offsets:    Vec<usize>,
     /// The object number of this object.
     id:         ObjNr,
     
-    data:       Vec<u8>,
+    inner:      Stream<ObjStmInfo>
 }
 
 impl Object for ObjectStream {
-    fn serialize<W: io::Write>(&self, _out: &mut W) -> io::Result<()> {
+    fn serialize<W: io::Write>(&self, _out: &mut W) -> Result<()> {
         unimplemented!();
     }
     fn from_primitive(p: Primitive, resolve: &dyn Resolve) -> Result<ObjectStream> {
-        let PdfStream {info, mut data} = PdfStream::from_primitive(p, resolve)?;
-        let mut info = StreamInfo::<ObjStmInfo>::from_primitive(Primitive::Dictionary (info), resolve)?;
-        decode_fully(&mut data, &mut info.filters)?;
+        let stream: Stream<ObjStmInfo> = Stream::from_primitive(p, resolve)?;
 
         let mut offsets = Vec::new();
         {
-            let mut lexer = Lexer::new(&data);
-            for _ in 0..(info.num_objects as ObjNr) {
+            let mut lexer = Lexer::new(stream.data()?);
+            for _ in 0..(stream.info.num_objects as ObjNr) {
                 let _obj_nr = lexer.next()?.to::<ObjNr>()?;
                 let offset = lexer.next()?.to::<usize>()?;
                 offsets.push(offset);
@@ -234,10 +221,9 @@ impl Object for ObjectStream {
         }
 
         Ok(ObjectStream {
-            info: info,
             offsets: offsets,
             id: 0, // TODO
-            data: data,
+            inner: stream
         })
     }
 }
@@ -247,14 +233,15 @@ impl ObjectStream {
         if index >= self.offsets.len() {
             err!(PdfError::ObjStmOutOfBounds {index: index, max: self.offsets.len()});
         }
-        let start = self.info.first as usize + self.offsets[index];
+        let start = self.inner.info.first as usize + self.offsets[index];
+        let data = self.inner.data()?;
         let end = if index == self.offsets.len() - 1 {
-            self.data.len()
+            data.len()
         } else {
-            self.info.first as usize + self.offsets[index + 1]
+            self.inner.info.first as usize + self.offsets[index + 1]
         };
 
-        Ok(&self.data[start..end])
+        Ok(&data[start..end])
     }
     /// Returns the number of contained objects
     pub fn n_objects(&self) -> usize {

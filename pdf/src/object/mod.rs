@@ -42,7 +42,7 @@ pub const NO_RESOLVE: &'static dyn Resolve = &NoResolve {} as &dyn Resolve;
 /// A PDF Object
 pub trait Object: Sized {
     /// Write object as a byte stream
-    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()>;
+    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()>;
     /// Convert primitive to Self
     fn from_primitive(p: Primitive, resolve: &dyn Resolve) -> Result<Self>;
 }
@@ -58,8 +58,9 @@ pub struct PlainRef {
     pub gen:    GenNr,
 }
 impl Object for PlainRef {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()>  {
-        write!(out, "{} {} R", self.id, self.gen)
+    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()>  {
+        write!(out, "{} {} R", self.id, self.gen)?;
+        Ok(())
     }
     fn from_primitive(p: Primitive, _: &dyn Resolve) -> Result<Self> {
         p.to_reference()
@@ -106,7 +107,7 @@ impl<T: Object> Ref<T> {
     }
 }
 impl<T: Object> Object for Ref<T> {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()>  {
+    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()>  {
         self.inner.serialize(out)
     }
     fn from_primitive(p: Primitive, _: &dyn Resolve) -> Result<Self> {
@@ -125,8 +126,9 @@ impl<T> fmt::Debug for Ref<T> {
 //////////////////////////////////////
 
 impl Object for i32 {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
-        write!(out, "{}", self)
+    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()> {
+        write!(out, "{}", self)?;
+        Ok(())
     }
     fn from_primitive(p: Primitive, resolve: &dyn Resolve) -> Result<Self> {
         match p {
@@ -137,37 +139,41 @@ impl Object for i32 {
     }
 }
 impl Object for usize {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
-        write!(out, "{}", self)
+    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()> {
+        write!(out, "{}", self)?;
+        Ok(())
     }
     fn from_primitive(p: Primitive, r: &dyn Resolve) -> Result<Self> {
         Ok(i32::from_primitive(p, r)? as usize)
     }
 }
 impl Object for f32 {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
-        write!(out, "{}", self)
+    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()> {
+        write!(out, "{}", self)?;
+        Ok(())
     }
     fn from_primitive(p: Primitive, _: &dyn Resolve) -> Result<Self> {
         p.as_number()
     }
 }
 impl Object for bool {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
-        write!(out, "{}", self)
+    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()> {
+        write!(out, "{}", self)?;
+        Ok(())
     }
     fn from_primitive(p: Primitive, _: &dyn Resolve) -> Result<Self> {
         p.as_bool()
     }
 }
 impl Object for Dictionary {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
+    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()> {
         write!(out, "<<")?;
         for (key, val) in self.iter() {
             write!(out, "/{} ", key)?;
             val.serialize(out)?;
         }
-        write!(out, ">>")
+        write!(out, ">>")?;
+        Ok(())
     }
     fn from_primitive(p: Primitive, r: &dyn Resolve) -> Result<Self> {
         match p {
@@ -179,7 +185,7 @@ impl Object for Dictionary {
 }
 
 impl Object for String {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
+    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()> {
         for b in self.as_str().chars() {
             match b {
                 '\\' | '(' | ')' => write!(out, r"\")?,
@@ -196,7 +202,7 @@ impl Object for String {
 }
 
 impl<T: Object> Object for Vec<T> {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
+    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()> {
         write_list(out, self.iter())
     }
     /// Will try to convert `p` to `T` first, then try to convert `p` to Vec<T>
@@ -220,19 +226,20 @@ impl<T: Object> Object for Vec<T> {
 }
 
 impl Object for Primitive {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
+    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()> {
         match *self {
-            Primitive::Null => write!(out, "null"),
-            Primitive::Integer (ref x) => x.serialize(out),
-            Primitive::Number (ref x) => x.serialize(out),
-            Primitive::Boolean (ref x) => x.serialize(out),
-            Primitive::String (ref x) => x.serialize(out),
-            Primitive::Stream (ref x) => x.serialize(out),
-            Primitive::Dictionary (ref x) => x.serialize(out),
-            Primitive::Array (ref x) => x.serialize(out),
-            Primitive::Reference (ref x) => x.serialize(out),
-            Primitive::Name (ref x) => x.serialize(out),
+            Primitive::Null => write!(out, "null")?,
+            Primitive::Integer (ref x) => x.serialize(out)?,
+            Primitive::Number (ref x) => x.serialize(out)?,
+            Primitive::Boolean (ref x) => x.serialize(out)?,
+            Primitive::String (ref x) => x.serialize(out)?,
+            Primitive::Stream (ref x) => x.serialize(out)?,
+            Primitive::Dictionary (ref x) => x.serialize(out)?,
+            Primitive::Array (ref x) => x.serialize(out)?,
+            Primitive::Reference (ref x) => x.serialize(out)?,
+            Primitive::Name (ref x) => x.serialize(out)?,
         }
+        Ok(())
     }
     fn from_primitive(p: Primitive, _: &dyn Resolve) -> Result<Self> {
         Ok(p)
@@ -240,7 +247,7 @@ impl Object for Primitive {
 }
 
 impl<V: Object> Object for BTreeMap<String, V> {
-    fn serialize<W: io::Write>(&self, _out: &mut W) -> io::Result<()> {
+    fn serialize<W: io::Write>(&self, _out: &mut W) -> Result<()> {
         unimplemented!();
     }
     fn from_primitive(p: Primitive, resolve: &dyn Resolve) -> Result<Self> {
@@ -259,9 +266,9 @@ impl<V: Object> Object for BTreeMap<String, V> {
 }
 
 impl Object for () {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
-        write!(out, "null")
-
+    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()> {
+        write!(out, "null")?;
+        Ok(())
     }
     fn from_primitive(_p: Primitive, _resolve: &dyn Resolve) -> Result<Self> {
         Ok(())

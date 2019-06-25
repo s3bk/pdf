@@ -161,3 +161,6 @@ macro_rules! bail {
         err!(PdfError::Other { msg: format!($($t)*) })
     }
 }
+macro_rules! unimplemented {
+    () => (bail!("Unimplemented @ {}:{}", file!(), line!()))
+}

@@ -63,9 +63,7 @@ static STANDARD_FOTNS: &[(&'static str, &'static str)] = &[
 ];
 
 impl Object for Font {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
-        unimplemented!()
-    }
+    fn serialize<W: io::Write>(&self, _out: &mut W) -> Result<()> {unimplemented!()}
     fn from_primitive(p: Primitive, resolve: &dyn Resolve) -> Result<Self> {
         let mut dict = p.to_dictionary(resolve)?;
         dict.expect("Font", "Type", "Font", true)?;
