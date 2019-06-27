@@ -6,12 +6,13 @@ use std::marker::PhantomData;
 use std::collections::HashMap;
 use error::*;
 use object::*;
-use xref::{XRefTable, XRef};
+use xref::XRefTable;
 use primitive::{Primitive, Dictionary, PdfString};
 use backend::Backend;
 use std::rc::Rc;
 use any::Any;
 use std::cell::RefCell;
+use std::ops::Range;
 
 pub struct PromisedRef<T> {
     inner:      PlainRef,
@@ -96,24 +97,43 @@ impl<B: Backend> File<B> {
             }
         }
     }
-    fn walk_pagetree(&self, pos: &mut usize, tree: Ref<PagesNode>, func: &mut impl FnMut(usize, &Page)) -> Result<()> {
-        match *(self.deref(tree)?) {
-            PagesNode::Tree(ref child) => {
-                for &k in &child.kids {
-                    self.walk_pagetree(pos, k, func);
+    fn walk_pagetree(&self, pos: &mut u32, tree: Ref<PagesNode>,
+        func: &mut impl FnMut(u32, &Page), range: &Range<u32>) -> Result<()>
+    {
+        let node = self.deref(tree)?;
+        dbg!(&node);
+        match *node {
+            PagesNode::Tree(ref tree) => {
+                let end = *pos + tree.count as u32; // non-inclusive
+                if range.start < end && *pos < range.end {
+                    for &k in &tree.kids {
+                        self.walk_pagetree(pos, k, func, range)?;
+                        if *pos >= range.end {
+                            break;
+                        }
+                    }
                 }
+                
+                *pos = end;
             },
             PagesNode::Leaf(ref page) => {
-                func(*pos, page);
+                if range.contains(pos) {
+                    info!("page {}", *pos);
+                    func(*pos, page);
+                }
                 *pos += 1;
             }
         }
         Ok(())
     }
-    pub fn pages(&self, mut func: impl FnMut(usize, &Page)) {
+    pub fn pages(&self, mut func: impl FnMut(u32, &Page), range: Range<u32>) -> Result<()> {
+        let mut page_nr = 0;
+        dbg!(self.get_root()); 
         for &k in &self.get_root().pages.kids {
-            self.walk_pagetree(&mut 0, k, &mut func);
+            dbg!(k);
+            self.walk_pagetree(&mut page_nr, k, &mut func, &range)?;
         }
+        Ok(())
     }
     pub fn get_num_pages(&self) -> Result<i32> {
         Ok(self.trailer.root.pages.count)
@@ -132,7 +152,7 @@ impl<B: Backend> File<B> {
                         return self.find_page(t, offset, page_nr);
                     }
                 },
-                PagesNode::Leaf(ref p) => {
+                PagesNode::Leaf(_) => {
                     if offset < page_nr {
                         offset += 1;
                     } else {

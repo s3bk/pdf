@@ -24,7 +24,13 @@ impl<I: Object + fmt::Debug> Stream<I> {
             debug!("Stream Info: {:?}", &self.info);
             let mut data = Cow::Borrowed(&*self.raw_data);
             for filter in &self.info.filters {
-                data = decode(&*data, filter)?.into();
+                data = match decode(&*data, filter) {
+                    Ok(data) => data.into(),
+                    Err(e) => {
+                        dump_data(&data);
+                        return Err(e);
+                    }
+                };
             }
             Ok(data.into_owned())
         }).map(|v| v.as_slice())

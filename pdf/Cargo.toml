@@ -21,7 +21,7 @@ path = "../derive"
 snafu = "0.4"
 isatty = "0.1"
 num-traits = "0.1.36"
-inflate = "0.1.1"
+inflate = "0.4.5"
 ansi_term = "0.9.0"
 byteorder = "1.0.0"
 itertools = "0.6.0"
@@ -35,6 +35,7 @@ chrono = "0.4.0"
 bitflags = "1.1"
 once_cell = "0.2"
 log = "*"
+tempfile = "*"
 
 [lib]
 doctest = false

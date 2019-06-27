@@ -5,3 +5,6 @@ members = [
     "view",
     "examples"
 ]
+
+[patch.crates-io]
+font-kit = { path = "../font-kit" }

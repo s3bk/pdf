@@ -69,8 +69,8 @@ impl Object for Font {
         dict.expect("Font", "Type", "Font", true)?;
         let base_font = dict.require("Font", "BaseFont")?.to_name()?;
         let subtype = FontType::from_primitive(dict.require("Font", "Subtype")?, resolve)?;
-        let mut info = match STANDARD_FOTNS.iter().filter(|&(name, filename)| *name == base_font).next() {
-            Some(&(base_font, filename)) => None,
+        let mut info = match STANDARD_FOTNS.iter().filter(|&(name, _)| *name == base_font).next() {
+            Some(_) => None,
             None => {
                 // reconstruct p
                 let p = Primitive::Dictionary(dict);

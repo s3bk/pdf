@@ -16,7 +16,7 @@ use std::io;
 use std::fmt;
 use std::marker::PhantomData;
 use std::collections::BTreeMap;
-
+use std::rc::Rc;
 
 pub type ObjNr = u64;
 pub type GenNr = u16;
@@ -262,6 +262,15 @@ impl<V: Object> Object for BTreeMap<String, V> {
             Primitive::Reference (id) => BTreeMap::from_primitive(resolve.resolve(id)?, resolve),
             p =>  Err(PdfError::UnexpectedPrimitive {expected: "Dictionary", found: p.get_debug_name()}.into())
         }
+    }
+}
+
+impl<T: Object> Object for Rc<T> {
+    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()> {
+        (**self).serialize(out)
+    }
+    fn from_primitive(p: Primitive, resolve: &dyn Resolve) -> Result<Self> {
+        Ok(Rc::new(T::from_primitive(p, resolve)?))
     }
 }
 

@@ -5,6 +5,7 @@ use pdf::error::PdfError;
 use std::env;
 use std::fs;
 use view::render_page;
+use pathfinder_export::{Export, FileFormat};
 
 fn main() -> Result<(), PdfError> {
     env_logger::init();
@@ -15,7 +16,7 @@ fn main() -> Result<(), PdfError> {
     
     file.pages(|i, p| {
         let mut out = fs::File::create(format!("{}_{}.svg", path, i)).expect("can't create output file");
-        render_page(&file, p).write_svg(&mut out);
-    });
+        render_page(&file, p).export(&mut out, FileFormat::SVG);
+    }, 0 .. 3)?;
     Ok(())
 }

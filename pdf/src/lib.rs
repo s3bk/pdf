@@ -16,6 +16,7 @@ extern crate memmap;
 extern crate tuple;
 extern crate chrono;
 extern crate once_cell;
+extern crate tempfile;
 
 #[macro_use] pub mod error;
 //mod macros;

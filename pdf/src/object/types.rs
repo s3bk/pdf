@@ -46,7 +46,7 @@ impl Deref for PageRc {
 }
 
 
-#[derive(Object, Default)]
+#[derive(Object, Default, Debug)]
 pub struct Catalog {
 // Version: Name,
     #[pdf(key="Pages")]
@@ -54,6 +54,7 @@ pub struct Catalog {
 // PageLabels: number_tree,
     #[pdf(key="Names")]
     pub names: Option<NameDictionary>,
+    
 // Dests: Dict
 // ViewerPreferences: dict
 // PageLayout: name
@@ -96,7 +97,7 @@ pub struct PageTree {
     // Note about inheritance..= if we wanted to 'inherit' things at the time of reading, we would
     // want Option<Ref<Resources>> here most likely.
     #[pdf(key="Resources")]
-    pub resources: Option<Ref<Resources>>,
+    pub resources: Option<Rc<Resources>>,
     
     #[pdf(key="MediaBox")]
     pub media_box:  Option<Rect>,
@@ -111,7 +112,7 @@ pub struct Page {
     pub parent: Ref<PageTree>,
 
     #[pdf(key="Resources")]
-    pub resources: Option<Ref<Resources>>,
+    pub resources: Option<Rc<Resources>>,
     
     #[pdf(key="MediaBox")]
     pub media_box:  Option<Rect>,
@@ -126,13 +127,13 @@ pub struct Page {
     pub contents:   Option<Content>
 }
 fn inherit<T, F, B: Backend>(mut parent: Ref<PageTree>, file: &File<B>, f: F) -> Result<Option<T>>
-    where F: Fn(Rc<PageTree>) -> Option<Result<T>>
+    where F: Fn(Rc<PageTree>) -> Option<T>
 {
     loop {
         let page_tree = file.deref(parent)?;
         
         match (page_tree.parent, f(page_tree)) {
-            (_, Some(t)) => break Ok(Some(t?)),
+            (_, Some(t)) => break Ok(Some(t)),
             (Some(p), None) => parent = p,
             (None, None) => break Ok(None)
         }
@@ -153,14 +154,14 @@ impl Page {
     pub fn media_box<B: Backend>(&self, file: &File<B>) -> Result<Rect> {
         match self.media_box {
             Some(b) => Ok(b),
-            None => inherit(self.parent, file, |pt| pt.media_box.map(|b| Ok(b)))?
+            None => inherit(self.parent, file, |pt| pt.media_box)?
                 .ok_or_else(|| PdfError::MissingEntry { typ: "Page", field: "MediaBox".into() })
         }
     }
     pub fn crop_box<B: Backend>(&self, file: &File<B>) -> Result<Rect> {
         match self.crop_box {
             Some(b) => Ok(b),
-            None => match inherit(self.parent, file, |pt| pt.crop_box.map(|b| Ok(b)))? {
+            None => match inherit(self.parent, file, |pt| pt.crop_box)? {
                 Some(b) => Ok(b),
                 None => self.media_box(file)
             }
@@ -168,8 +169,8 @@ impl Page {
     }
     pub fn resources<B: Backend>(&self, file: &File<B>) -> Result<Rc<Resources>> {
         match self.resources {
-            Some(r) => file.deref(r),
-            None => inherit(self.parent, file, |pt| pt.resources.map(|r| file.deref(r)))?
+            Some(ref r) => Ok(r.clone()),
+            None => inherit(self.parent, file, |pt| pt.resources.clone())?
                 .ok_or_else(|| PdfError::MissingEntry { typ: "Page", field: "Resources".into() })
         }
     }
@@ -207,10 +208,38 @@ impl Resources {
 }
 
 #[derive(Object, Debug)]
+pub enum LineCap {
+    Butt = 0,
+    Round = 1,
+    Square = 2
+}
+#[derive(Object, Debug)]
+pub enum LineJoin {
+    Miter = 0,
+    Round = 1,
+    Bevel = 2
+}
+
+#[derive(Object, Debug)]
 #[pdf(Type = "ExtGState?")]
 /// `ExtGState`
 pub struct GraphicsStateParameters {
-    //TODO
+    #[pdf(key="LW")]
+    line_width: Option<f32>,
+    
+    #[pdf(key="LC")]
+    line_cap: Option<LineCap>,
+    
+    #[pdf(key="LC")]
+    line_join: Option<LineJoin>,
+    
+    #[pdf(key="ML")]
+    miter_limit: Option<f32>,
+    
+    // D : dash pattern
+    #[pdf(key="RI")]
+    rendering_intent: Option<String>,
+    
 }
 
 #[derive(Object, Debug)]
@@ -326,8 +355,7 @@ impl Object for Counter {
     }
 }
 
-
-
+#[derive(Debug)]
 pub enum NameTreeNode<T> {
     ///
     Intermediate (Vec<Ref<NameTree<T>>>),
@@ -336,7 +364,8 @@ pub enum NameTreeNode<T> {
 
 }
 /// Note: The PDF concept of 'root' node is an intermediate or leaf node which has no 'Limits'
-/// entry. Hence, `limits`
+/// entry. Hence, `limits`, 
+#[derive(Debug)]
 pub struct NameTree<T> {
     limits: Option<(PdfString, PdfString)>,
     node: NameTreeNode<T>,
@@ -404,8 +433,10 @@ impl<T: Object> Object for NameTree<T> {
 
 
 /// There is one `NameDictionary` associated with each PDF file.
-#[derive(Object)]
+#[derive(Object, Debug)]
 pub struct NameDictionary {
+    #[pdf(key="Pages")]
+    pages: Option<NameTree<Primitive>>,
     /*
     #[pdf(key="Dests")]
     ap: NameTree<T>,
@@ -413,8 +444,6 @@ pub struct NameDictionary {
     ap: NameTree<T>,
     #[pdf(key="JavaScript")]
     javascript: NameTree<T>,
-    #[pdf(key="Pages")]
-    pages: NameTree<T>,
     #[pdf(key="Templates")]
     templates: NameTree<T>,
     #[pdf(key="IDS")]
@@ -550,7 +579,7 @@ impl Object for Rect {
 
 // Stuff from chapter 10 of the PDF 1.7 ref
 
-#[derive(Object)]
+#[derive(Object, Debug)]
 pub struct MarkInformation { // TODO no /Type
     /// indicating whether the document conforms to Tagged PDF conventions
     #[pdf(key="Marked", default="false")]
@@ -563,13 +592,13 @@ pub struct MarkInformation { // TODO no /Type
     pub suspects: bool,
 }
 
-#[derive(Object)]
+#[derive(Object, Debug)]
 #[pdf(Type = "StructTreeRoot")]
 pub struct StructTreeRoot {
     #[pdf(key="K")]
     pub children: Vec<StructElem>,
 }
-#[derive(Object)]
+#[derive(Object, Debug)]
 pub struct StructElem {
     #[pdf(key="S")]
     /// `S`
@@ -586,7 +615,7 @@ pub struct StructElem {
 }
 
 
-#[derive(Object)]
+#[derive(Object, Debug)]
 pub enum StructType {
     Document,
     Part,

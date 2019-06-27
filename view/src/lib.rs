@@ -1,9 +1,6 @@
 #[macro_use] extern crate log;
 extern crate env_logger;
 
-use std::env::args;
-use std::time::SystemTime;
-use std::fs;
 use std::io::Write;
 use std::mem;
 use std::convert::TryInto;
@@ -18,15 +15,13 @@ use pdf::backend::Backend;
 use pdf::font::FontType;
 use pdf::content::Operation;
 
-use pathfinder_geometry::outline::{Contour, Outline};
-use pathfinder_geometry::basic::vector::Vector2F;
-use pathfinder_geometry::basic::rect::RectF;
-use pathfinder_geometry::basic::transform2d::Transform2DF;
-use pathfinder_geometry::color::ColorU;
+use pathfinder_content::color::ColorU;
+use pathfinder_geometry::{
+    vector::Vector2F, rect::RectF, transform2d::Transform2DF
+};
 use pathfinder_canvas::{CanvasRenderingContext2D, CanvasFontContext, Path2D, FillStyle};
 use pathfinder_renderer::scene::Scene;
 use font_kit::loaders::freetype::Font;
-use font_kit::hinting::HintingOptions;
 use euclid::Vector2D;
 use skribo::{Glyph, Layout, FontRef};
 
@@ -72,84 +67,250 @@ struct FontEntry {
     font: Font,
     subtype: FontType
 }
+enum TextMode {
+    Fill,
+    Stroke,
+    FillThenStroke,
+    Invisible,
+    FillAndClip,
+    StrokeAndClip
+}
+struct LineLayout<'a> {
+    state: &'a TextState<'a>,
+    font: FontRef,
+    glyphs: Vec<Glyph>,
+    scale: f32,
+    advance: Vector2D<f32>,
+}
+impl<'a> LineLayout<'a> {
+    fn new(state: &'a TextState) -> LineLayout<'a> {
+        LineLayout {
+            state,
+            font: FontRef::new(state.font.font.clone()),
+            glyphs: vec![],
+            scale: state.font_size / (state.font.font.metrics().units_per_em as f32),
+            advance: Vector2D::zero()
+        }
+    }
+    fn add_char(&mut self, c: char) {
+        let font = &self.state.font.font;
+        if let Some(glyph_id) = font.glyph_for_char(c) {
+            self.add_glyph(glyph_id);
+            
+            let dx = match c {
+                ' ' => self.state.word_space,
+                _   => self.state.char_space
+            };
+            self.advance.x += dx;
+        }
+    }
+    fn add_glyph(&mut self, glyph_id: u32) {
+        self.glyphs.push(Glyph {
+            font: self.font.clone(),
+            glyph_id,
+            offset: self.advance
+        });
+        self.advance += self.state.font.font.advance(glyph_id).unwrap() * self.scale;
+    }
+    fn advance(&mut self, offset: f32) {
+        self.advance.x += offset * self.state.font_size;
+    }
+    fn to_layout(self) -> Layout {
+        Layout {
+            size: self.state.font_size,
+            glyphs: self.glyphs,
+            advance: self.advance
+        }
+    }
+}
+struct TextState<'a> {
+    text_matrix: Transform2DF, // tracks current glyph
+    line_matrix: Transform2DF, // tracks current line
+    char_space: f32, // Character spacing
+    word_space: f32, // Word spacing
+    horiz_scale: f32, // Horizontal scaling
+    leading: f32, // Leading
+    font: &'a FontEntry, // Text font
+    font_size: f32, // Text font size
+    mode: TextMode, // Text rendering mode
+    rise: f32, // Text rise
+    knockout: f32 //Text knockout
+}
+impl<'a> TextState<'a> {
+    fn new(default_font: &FontEntry) -> TextState {
+        TextState {
+            text_matrix: Transform2DF::default(),
+            line_matrix: Transform2DF::default(),
+            char_space: 0.,
+            word_space: 0.,
+            horiz_scale: 1.,
+            leading: 0.,
+            font: default_font,
+            font_size: 0.,
+            mode: TextMode::Fill,
+            rise: 0.,
+            knockout: 0.
+        }
+    }
+    fn translate(&mut self, v: Vector2F) {
+        self.set_matrix(self.line_matrix.post_translate(v));
+    }
+    
+    // move to the next line
+    fn next_line(&mut self) {
+        debug!("next line");
+        self.translate(Vector2F::new(0., -self.leading * self.font_size));
+    }
+    // set text and line matrix
+    fn set_matrix(&mut self, m: Transform2DF) {
+        self.text_matrix = m;
+        self.line_matrix = m;
+    }
+    fn draw_text(&mut self, canvas: &mut CanvasRenderingContext2D, text: &str) {
+        let mut layout = LineLayout::new(self);
+        for c in text.chars() {
+            layout.add_char(c);
+        }
+        self.draw_layout(canvas, layout.to_layout());
+    }
+    fn advance(&mut self, v: Vector2F) {
+        self.text_matrix = self.text_matrix.post_translate(v);
+    }
+    fn draw_layout(&mut self, canvas: &mut CanvasRenderingContext2D, layout: Layout) {
+        let transform = Transform2DF::row_major(self.horiz_scale, 0., 0., -1.0, 0., self.rise)
+            .post_mul(&self.text_matrix);
+        dbg!(transform);
+        
+        let advance = layout.advance;
+        canvas.fill_layout(&layout, transform);
+        self.advance(Vector2F::new(advance.x * self.horiz_scale, 0.));
+    }
+}
 
-fn render_text<'a, I>(iter: & mut I, canvas: & mut CanvasRenderingContext2D, fonts: &'a HashMap<&'a str, FontEntry>, mut current_font: &'a FontEntry) 
+fn render_text<'a, I>(iter: & mut I, canvas: & mut CanvasRenderingContext2D, fonts: &'a HashMap<&'a str, FontEntry>, default_font: &'a FontEntry) 
     where I: Iterator<Item=&'a Operation>
 {
-    let mut current_line = Vector2F::default();
-    let mut current_char = current_line;
-    let mut font_size = 0.0;
+    let mut state = TextState::new(default_font);
     
     while let Some(op) = iter.next() {
         debug!("{}", op);
         let ref ops = op.operands;
         match op.operator.as_str() {
             "ET" => break,
-            "Tf" => { // text font
-                ops!(ops, font: &str, size: f32 => {
-                    if let Some(e) = fonts.get(font) {
-                        canvas.set_font(e.font.clone());
-                        current_font = e;
-                        debug!("new font: {}", e.font.full_name());
+            
+            // state modifiers
+            
+            // character spacing
+            "Tc" => ops!(ops, char_space: f32 => {
+                    state.char_space = char_space;
+            }),
+            
+            // word spacing
+            "Tw" => ops!(ops, word_space: f32 => {
+                    state.word_space = word_space;
+            }),
+            
+            // Horizontal scaling (in percent)
+            "Tz" => ops!(ops, scale: f32 => {
+                    state.horiz_scale = 0.01 * scale;
+            }),
+            
+            // leading
+            "TL" => ops!(ops, leading: f32 => {
+                    state.leading = leading;
+            }),
+            
+            // text font
+            "Tf" => ops!(ops, font: &str, size: f32 => {
+                if let Some(e) = fonts.get(font) {
+                    canvas.set_font(e.font.clone());
+                    state.font = e;
+                    debug!("new font: {}", e.font.full_name());
+                }
+                canvas.set_font_size(size);
+                state.font_size = size;
+            }),
+            
+            // render mode
+            "Tr" => ops!(ops, mode: i32 => {
+                use TextMode::*;
+                state.mode = match mode {
+                    0 => Fill,
+                    1 => Stroke,
+                    2 => FillThenStroke,
+                    3 => Invisible,
+                    4 => FillAndClip,
+                    5 => StrokeAndClip,
+                    _ => {
+                        warn!("Invalid text render mode: {}", mode);
+                        continue;
                     }
-                    canvas.set_font_size(size);
-                    font_size = size;
-                });
-            }
-            "Tj" => { // draw text
-                ops!(ops, text: &str => {
-                    canvas.fill_text(text, current_char + Vector2F::new(0.0, font_size));
-                    current_char = current_char + Vector2F::new(canvas.measure_text(text).width, 0.);
-                });
-            }
+                }
+            }),
+            
+            // text rise
+            "Ts" => ops!(ops, rise: f32 => {
+                state.rise = rise;
+            }),
+            
+            // positioning operators
+            // Move to the start of the next line
+            "Td" => ops_p!(ops, t => {
+                state.translate(t);
+            }),
+            
+            "TD" => ops_p!(ops, t => {
+                state.leading = -t.x();
+                state.translate(t);
+            }),
+            
+            // Set the text matrix and the text line matrix
+            "Tm" => ops!(ops, a: f32, b: f32, c: f32, d: f32, e: f32, f: f32 => {
+                state.set_matrix(Transform2DF::row_major(a, b, c, d, e, f));
+            }),
+            
+            // Move to the start of the next line
+            "T*" => {
+                state.next_line();
+            },
+            
+            // draw text
+            "Tj" => ops!(ops, text: &str => {
+                state.draw_text(canvas, text);
+            }),
+            
+            // move to the next line and draw text
+            "'" => ops!(ops, text: &str => {
+                state.next_line();
+                state.draw_text(canvas, text);
+            }),
+            
+            // set word and charactr spacing, move to the next line and draw text
+            "\"" => ops!(ops, word_space: f32, char_space: f32, text: &str => {
+                state.word_space = word_space;
+                state.char_space = char_space;
+                state.next_line();
+                state.draw_text(canvas, text);
+            }),
             "TJ" => {
                 let arr = ops[0].as_array().expect("not an array");
-                let mut glyphs = Vec::new();
-                let mut advance = Vector2D::zero();
-                let font = FontRef::new(current_font.font.clone());
+                let mut layout = LineLayout::new(&state);
                 
-                debug!("current font: {}", current_font.font.full_name());
-                let scale = font_size / (current_font.font.metrics().units_per_em as f32);
                 for arg in arr {
                     match arg {
                         Primitive::String(ref data) => {
                             for &b in data.as_bytes() {
-                                debug!("char: {} {}", b, b as char);
-                                if let Some(glyph_id) = current_font.font.glyph_for_char(b as char) {
-                                    glyphs.push(Glyph {
-                                        font: font.clone(),
-                                        glyph_id,
-                                        offset: advance
-                                    });
-                                    advance += current_font.font.advance(glyph_id).unwrap() * scale;
-                                }
+                                layout.add_char(b as char);
                             }
-                            //let advance = current_font.advance(b as u32).expect("can't get advance");
-                            //Vector2F::new(advance.x, advance.y) * 
-                            //transform = transform.post_transform(&Vector2F::new(canvas.measure_text(text).width, 0.));
                         },
                         p => {
                             let offset = p.as_number().expect("wrong argument to TJ");
-                            advance.x -= font_size * 0.001 * offset; // because why not PDF…
+                            layout.advance(-0.001 * offset); // because why not PDF…
                         }
                     }
                 }
-                let transform = Transform2DF::from_scale(Vector2F::new(1.0, -1.0))
-                    .post_mul(&Transform2DF::from_translation(current_line));
-                
-                canvas.fill_layout(&Layout {
-                    size: font_size,
-                    glyphs,
-                    advance
-                }, transform);
-                current_char = current_char + Vector2F::new(advance.x, advance.y);
-            },
-            "Td" => { // move current line
-                ops_p!(ops, t => {
-                    current_line = current_line + t;
-                    current_char = current_line;
-                });
-            },
+                state.draw_layout(canvas, layout.to_layout());
+            }
             _ => {}
         }
     }
@@ -160,7 +321,7 @@ fn render_text<'a, I>(iter: & mut I, canvas: & mut CanvasRenderingContext2D, fon
 pub fn render_page<B: Backend>(file: &PdfFile<B>, page: &Page) -> Scene {
     let Rect { left, right, top, bottom } = page.media_box(file).expect("no media box");
     
-    let resources = page.resources(file).expect("no resources");
+    let resources = page.resources(file);
     
     let rect = RectF::from_points(Vector2F::new(left, bottom), Vector2F::new(right, top));
     
@@ -180,7 +341,7 @@ pub fn render_page<B: Backend>(file: &PdfFile<B>, page: &Page) -> Scene {
     };
     
     let mut fonts = HashMap::new();
-    for (name, font) in resources.fonts() {
+    for (name, font) in resources.iter().flat_map(|r| r.fonts()) {
         dbg!((&name, &font));
         if let Some(Ok(data)) = font.data() {
             ::std::fs::File::create(&format!("/tmp/font_{}", name)).unwrap().write_all(data).unwrap();
@@ -323,6 +484,13 @@ pub fn render_page<B: Backend>(file: &PdfFile<B>, page: &Page) -> Scene {
             "k" => { // fill color
                 ops!(ops, c: f32, y: f32, m: f32, k: f32 => {
                     canvas.set_fill_style(cymk2fill(c, y, m, k));
+                });
+            }
+            "cs" => { // color space
+            }
+            "gs" => { // graphics state from dict
+                ops!(ops, dict: &str => {
+                
                 });
             }
             "BT" => render_text(&mut iter, &mut canvas, &fonts, &default_font),

@@ -1,6 +1,6 @@
 use itertools::Itertools;
 use tuple::*;
-use inflate::InflateStream;
+use inflate::inflate_bytes;
 use error::*;
 use std::mem;
 
@@ -138,25 +138,16 @@ fn decode_85(data: &[u8]) -> Result<Vec<u8>> {
 fn flate_decode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
     let predictor = params.predictor as usize;;
     let n_components = params.n_components as usize;
-    let _bits_per_component = params.bits_per_component as usize;
     let columns = params.columns as usize;
 
     // First flate decode
-    let mut inflater = InflateStream::from_zlib();
-    let mut out = Vec::<u8>::new();
-    let mut n = 0;
-    while n < data.len() {
-        let res = inflater.update(&data[n..]);
-        let (num_bytes_read, result) = res?;
-        n += num_bytes_read;
-        out.extend(result);
-    }
+    let decoded = inflate_bytes(data)?;
 
     // Then unfilter (PNG)
     // For this, take the old out as input, and write output to out
 
     if predictor > 10 {
-        let inp = out; // input buffer
+        let inp = decoded; // input buffer
         let rows = inp.len() / (columns+1);
         
         // output buffer
@@ -191,7 +182,7 @@ fn flate_decode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
         }
         Ok(out)
     } else {
-        Ok(out)
+        Ok(decoded)
     }
 }
 

@@ -164,3 +164,13 @@ macro_rules! bail {
 macro_rules! unimplemented {
     () => (bail!("Unimplemented @ {}:{}", file!(), line!()))
 }
+
+pub fn dump_data(data: &[u8]) {
+    use std::io::Write;
+    let (mut file, path) = tempfile::Builder::new()
+        .prefix("")
+        .tempfile_in("/tmp/pdf").unwrap()
+        .keep().unwrap();
+    file.write_all(&data).unwrap();
+    info!("data written to {:?}", path);
+}

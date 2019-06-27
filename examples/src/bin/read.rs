@@ -2,11 +2,10 @@ extern crate pdf;
 
 use std::env::args;
 use std::time::SystemTime;
-use std::fs;
-use std::io::Write;
 
 use pdf::file::File;
 use pdf::object::*;
+use pdf::backend::Backend;
 
 macro_rules! run {
     ($e:expr) => (
@@ -16,43 +15,43 @@ macro_rules! run {
         }
     )
 }
+fn walk_pagetree<B: Backend>(file: &File<B>, pos: &mut usize, tree: Ref<PagesNode>) {
+    match *(file.deref(tree).unwrap()) {
+        PagesNode::Tree(ref child) => {
+            for &k in &child.kids {
+                walk_pagetree(file, pos, k);
+            }
+        },
+        PagesNode::Leaf(ref page) => {
+            println!("{} {:?}", *pos, page);
+            *pos += 1;
+        }
+    }
+}
 fn main() {
     let path = args().nth(1).expect("no file given");
     println!("read: {}", path);
     let now = SystemTime::now();
     let file = run!(File::<Vec<u8>>::open(&path));
     
-    let num_pages = file.get_root().pages.count;
-    let mut pages = file.pages();
-    for i in 0..num_pages {
-        let p = file.get_page(i).unwrap();
-        assert_eq!(p as *const Page, pages.next().unwrap() as *const Page); 
+    for &k in &file.get_root().pages.kids {
+        walk_pagetree(&file, &mut 0, k);
     }
-    assert!(pages.next().is_none());
+    
+    let mut num_fonts = 0;
+    let mut num_images = 0;
+    file.pages(|_, page| {
+        let resources = page.resources(&file).unwrap();
+        for xobject in resources.xobjects.iter().flat_map(|d| d.values()) {
+            if let XObject::Image(ref im) = xobject {
+                num_images += 1;
+            }
+        }
+        num_fonts += resources.fonts.iter().flat_map(|d| d.values()).count();
+    });
+    println!("Found {} image(s).", num_images);
 
-    let images: Vec<_> = file.pages()
-        .filter_map(|page| page.resources.as_ref())
-        .filter_map(|res| res.xobjects.as_ref())
-        .flat_map(|xo| xo)
-        .filter_map(|(_, o)| match *o { XObject::Image(ref im) => Some(im), _ => None })
-        .collect();
-
-    for (i,img) in images.iter().enumerate() {
-        let fname = format!("extracted_image{}.jpeg", i);
-        let mut f = fs::File::create(fname.as_str()).unwrap();
-        f.write_all(&img.data);
-        println!("Wrote file {}.", fname);
-    }
-    println!("Found {} image(s).", images.len());
-
-    let fonts: Vec<_> =  file.pages()
-        .filter_map(|page| page.resources.as_ref())
-        .filter_map(|res| res.fonts.as_ref())
-        .flat_map(|xo| xo)
-        .filter_map(|(_, o)| Some(o) )
-        .collect();
-
-    println!("Found {} font(s).", fonts.len());
+    println!("Found {} font(s).", num_fonts);
     
     if let Ok(elapsed) = now.elapsed() {
         println!("Time: {}s", elapsed.as_secs() as f64

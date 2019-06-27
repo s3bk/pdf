@@ -2,11 +2,8 @@ extern crate pdf;
 
 use std::env::args;
 use std::time::SystemTime;
-use std::fs;
-use std::io::Write;
 use std::error::Error;
 use pdf::file::File;
-use pdf::object::*;
 use pdf::content::*;
 use pdf::primitive::Primitive;
 
@@ -23,14 +20,14 @@ fn add_primitive(p: &Primitive, out: &mut String) {
     }
 }
 
-fn main() -> Result<(), Box<Error>> {
+fn main() -> Result<(), Box<dyn Error>> {
     let path = args().nth(1).expect("no file given");
     println!("read: {}", path);
     let now = SystemTime::now();
     let file = File::<Vec<u8>>::open(&path)?;
     
     let mut out = String::new();
-    for page in file.pages() {
+    file.pages(|_, page| {
         for content in &page.contents {
             for &Operation { ref operator, ref operands } in &content.operations {
                 // println!("{} {:?}", operator, operands);
@@ -40,7 +37,7 @@ fn main() -> Result<(), Box<Error>> {
                 }
             }
         }
-    }
+    }, 0 .. 10);
     println!("{}", out);
     
     Ok(())

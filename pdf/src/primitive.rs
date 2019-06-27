@@ -355,6 +355,12 @@ impl<'a> TryInto<f32> for &'a Primitive {
         self.as_number()
     }
 }
+impl<'a> TryInto<i32> for &'a Primitive {
+    type Error = PdfError;
+    fn try_into(self) -> Result<i32> {
+        self.as_integer()
+    }
+}
 impl<'a> TryInto<&'a str> for &'a Primitive {
     type Error = PdfError;
     fn try_into(self) -> Result<&'a str> {

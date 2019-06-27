@@ -9,11 +9,12 @@ edition = "2018"
 [dependencies]
 pdf = { path = "../pdf" }
 pathfinder_geometry = { path = "../../pathfinder/geometry" }
+pathfinder_content = { path = "../../pathfinder/content" }
 pathfinder_canvas = { path = "../../pathfinder/canvas" }
 pathfinder_renderer = { path = "../../pathfinder/renderer" }
 pathfinder_gl = { path = "../../pathfinder/gl" }
 pathfinder_gpu = { path = "../../pathfinder/gpu" }
-skribo = { path = "../../skribo" }
+pathfinder_export = { path = "../../pathfinder/export" }
 euclid = "0.19"
 log = "*"
 env_logger = "*"
@@ -21,3 +22,6 @@ font-kit = { path = "../../font-kit" }
 gl = "0.6"
 sdl2 = "0.32"
 sdl2-sys = "0.32"
+
+[dependencies.skribo]
+path = "../../skribo"
