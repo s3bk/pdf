@@ -7,7 +7,7 @@ readme = "README.md"
 keywords = ["pdf"]
 license = "MIT"
 documentation = "https://docs.rs/pdf"
-edition = "2015"
+edition = "2018"
 description = """
 Read, alter and write PDF files.
 (Crate that previously resided here moved to pdf-canvas)
@@ -32,10 +32,10 @@ lzw = "0.10.0"
 tuple = "0.4.0"
 glob = "0.2.11"
 chrono = "0.4.0"
-bitflags = "1.1"
 once_cell = "0.2"
 log = "*"
 tempfile = "*"
+md5 = "0.6"
 
 [lib]
 doctest = false

@@ -3,18 +3,17 @@ use primitive::*;
 use error::*;
 use std::io;
 
-bitflags! {
-    struct Flags: u32 {
-        const FixedPitch    = 1 << 0;
-        const Serif         = 1 << 1;
-        const Symbolic      = 1 << 2;
-        const Script        = 1 << 3;
-        const Nonsymbolic   = 1 << 5;
-        const Italic        = 1 << 6;
-        const AllCap        = 1 << 16;
-        const SmallCap      = 1 << 17;
-        const ForceBold     = 1 << 18;
-    }
+#[allow(non_upper_case_globals, dead_code)] 
+mod flags {
+    const FixedPitch: u32    = 1 << 0;
+    const Serif: u32         = 1 << 1;
+    const Symbolic: u32      = 1 << 2;
+    const Script: u32        = 1 << 3;
+    const Nonsymbolic: u32   = 1 << 5;
+    const Italic: u32        = 1 << 6;
+    const AllCap: u32        = 1 << 16;
+    const SmallCap: u32      = 1 << 17;
+    const ForceBold: u32     = 1 << 18;
 }
 /*
 fn decode(flags: Flags, byte: u8) -> char {

@@ -6,17 +6,7 @@
 
 #[macro_use] extern crate pdf_derive;
 #[macro_use] extern crate snafu;
-#[macro_use] extern crate bitflags;
 #[macro_use] extern crate log;
-
-extern crate num_traits;
-extern crate inflate;
-extern crate itertools;
-extern crate memmap;
-extern crate tuple;
-extern crate chrono;
-extern crate once_cell;
-extern crate tempfile;
 
 #[macro_use] pub mod error;
 //mod macros;

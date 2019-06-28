@@ -251,6 +251,12 @@ impl Primitive {
             p => unexpected_primitive!(Name, p.get_debug_name())
         }
     }
+    pub fn as_string(&self) -> Result<&PdfString> {
+        match self {
+            Primitive::String(ref data) => Ok(data),
+            p => unexpected_primitive!(String, p.get_debug_name())
+        }
+    }
     /// Does accept a Reference
     pub fn as_array(&self) -> Result<&[Primitive]> {
         match self {
