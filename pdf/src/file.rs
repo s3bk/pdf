@@ -4,15 +4,16 @@ use std::io::Read;
 use std::{str};
 use std::marker::PhantomData;
 use std::collections::HashMap;
-use error::*;
-use object::*;
-use xref::XRefTable;
-use primitive::{Primitive, Dictionary, PdfString};
-use backend::Backend;
-use std::rc::Rc;
-use any::Any;
 use std::cell::RefCell;
 use std::ops::Range;
+use std::rc::Rc;
+
+use crate::error::*;
+use crate::object::*;
+use crate::xref::XRefTable;
+use crate::primitive::{Primitive, Dictionary, PdfString};
+use crate::backend::Backend;
+use crate::any::Any;
 
 pub struct PromisedRef<T> {
     inner:      PlainRef,
@@ -88,7 +89,7 @@ impl<B: Backend> File<B> {
             Entry::Occupied(e) => {
                 Ok(e.get().clone().downcast().expect("wrong type"))
             },
-            Entry::Vacant(mut e) => {
+            Entry::Vacant(e) => {
                 let primitive = self.resolve(r.get_inner())?;
                 let obj = T::from_primitive(primitive, &|id| self.resolve(id))?;
                 let rc = Rc::new(obj);
@@ -101,7 +102,6 @@ impl<B: Backend> File<B> {
         func: &mut impl FnMut(u32, &Page), range: &Range<u32>) -> Result<()>
     {
         let node = self.deref(tree)?;
-        dbg!(&node);
         match *node {
             PagesNode::Tree(ref tree) => {
                 let end = *pos + tree.count as u32; // non-inclusive

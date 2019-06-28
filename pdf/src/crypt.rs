@@ -8,12 +8,26 @@ const PADDING: [u8; 32] = [
 ];
 
 struct Decoder {
-    }
+    key_len: usize
+    key: [u8; 16] // maximum length
+}
 impl Decoder {
     fn default(dict: &Dictionary) -> Decoder {
         Decoder::from_password(dict, &b"")
     }
-    fn from_password(dict: &Dictionary, pass: &[u8]) -> Decoder {
+    fn from_password(dict: &Dictionary, pass: &[u8]) -> Result<Decoder> {
+        // get important data first
+        let o = dict.get("O")   
+            .ok_or(PdfError::MissingEntry { typ: "Encrypt Dictionary", field: "O".into()})?
+            as_string()?.as_bytes();
+    
+        let r = dict.get("R").as_integer()
+            .ok_or(PdfError::MissingEntry { typ: "Encrypt Dictionary", field: "O".into()})? as u32;
+        
+        let level = 3;
+        let key_size = 5;
+        
+        // a) and b)
         let mut hash = md5::Context::new();
         if pass.len() < 32 {
             hash.consume(pass);
@@ -22,9 +36,31 @@ impl Decoder {
             hash.consume(&pass[.. 32]);
         }
         
-        let o = dict.get("O")   
-            .ok_or(PdfError::MissingEntry { typ: "Encrypt Dictionary", field: "O".into()})?
-            as_string()?.as_bytes();
+        // c)
+        
+        hash.consume(o);
+        
+        // d)
+        
+        hash.consume(r.to_le_bytes());
+        
+        // e) 
+        
+        // f) 
+        if level >= 4 {
+            hash.consume([0xff, 0xff, 0xff, 0xff]);
+        }
+        
+        // g) 
+        let mut data = *hash.compute();
+        
+        // h) 
+        if level >= 3 {
+            for _ in 0 .. 50 {
+                data = md5::compute(&data[.. key_size]);
+            }
+        }
+        
         
         
 pub fn decrypt(&self, data: &[u8]) -> Result<Vec<u8>> {

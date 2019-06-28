@@ -1,11 +1,12 @@
-use object::*;
-use primitive::*;
-use error::*;
-use parser::Lexer;
-use enc::decode;
-use once_cell::unsync::OnceCell;
-use std::borrow::Cow;
+use crate::object::*;
+use crate::primitive::*;
+use crate::error::*;
+use crate::parser::Lexer;
+use crate::enc::decode;
 
+use once_cell::unsync::OnceCell;
+
+use std::borrow::Cow;
 use std::io;
 use std::ops::Deref;
 use std::fmt;
@@ -21,12 +22,12 @@ pub struct Stream<I: Object=()> {
 impl<I: Object + fmt::Debug> Stream<I> {
     pub fn data(&self) -> Result<&[u8]> {
         self.decoded.get_or_try_init(|| {
-            debug!("Stream Info: {:?}", &self.info);
             let mut data = Cow::Borrowed(&*self.raw_data);
             for filter in &self.info.filters {
                 data = match decode(&*data, filter) {
                     Ok(data) => data.into(),
                     Err(e) => {
+                        debug!("Stream Info: {:?}", &self.info);
                         dump_data(&data);
                         return Err(e);
                     }

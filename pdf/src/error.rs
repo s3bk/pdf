@@ -1,4 +1,4 @@
-use object::ObjNr;
+use crate::object::ObjNr;
 use std::io;
 use std::error::Error;
 use std::process::Termination;

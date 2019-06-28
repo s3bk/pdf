@@ -1,6 +1,6 @@
-use object::*;
-use primitive::*;
-use error::*;
+use crate::object::*;
+use crate::primitive::*;
+use crate::error::*;
 use std::io;
 
 #[allow(non_upper_case_globals, dead_code)] 
@@ -68,7 +68,7 @@ impl Object for Font {
         dict.expect("Font", "Type", "Font", true)?;
         let base_font = dict.require("Font", "BaseFont")?.to_name()?;
         let subtype = FontType::from_primitive(dict.require("Font", "Subtype")?, resolve)?;
-        let mut info = match STANDARD_FOTNS.iter().filter(|&(name, _)| *name == base_font).next() {
+        let info = match STANDARD_FOTNS.iter().filter(|&(name, _)| *name == base_font).next() {
             Some(_) => None,
             None => {
                 // reconstruct p
@@ -132,7 +132,7 @@ pub struct FontDescriptor {
     font_name: String,
     
     #[pdf(key="FontFamily")]
-    font_family: Option<String>,
+    font_family: Option<PdfString>,
     
     #[pdf(key="FontStretch")]
     font_stretch: Option<FontStretch>,

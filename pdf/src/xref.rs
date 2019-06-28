@@ -1,7 +1,7 @@
-use error::*;
 use std;
 use std::fmt::{Debug, Formatter};
-use object::*;
+use crate::error::*;
+use crate::object::*;
 
 ///////////////////////////
 // Cross-reference table //

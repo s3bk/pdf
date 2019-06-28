@@ -1,8 +1,9 @@
-use error::*;
+use crate::error::*;
+use crate::object::{PlainRef, Resolve, Object};
+
 use std::collections::{btree_map, BTreeMap};
 use std::{str, fmt, io};
 use std::ops::{Index, Range};
-use object::{PlainRef, Resolve, Object};
 use chrono::{DateTime, FixedOffset};
 use std::ops::Deref;
 use std::convert::TryInto;
@@ -365,6 +366,12 @@ impl<'a> TryInto<i32> for &'a Primitive {
     type Error = PdfError;
     fn try_into(self) -> Result<i32> {
         self.as_integer()
+    }
+}
+impl<'a> TryInto<&'a [Primitive]> for &'a Primitive {
+    type Error = PdfError;
+    fn try_into(self) -> Result<&'a [Primitive]> {
+        self.as_array()
     }
 }
 impl<'a> TryInto<&'a str> for &'a Primitive {

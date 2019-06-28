@@ -7,7 +7,7 @@ readme = "README.md"
 keywords = ["pdf"]
 license = "MIT"
 documentation = "https://docs.rs/pdf"
-edition = "2015"
+edition = "2018"
 description = """
 Read, alter and write PDF files.
 (Crate that previously resided here moved to pdf-canvas)

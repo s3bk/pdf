@@ -1,11 +1,11 @@
 use itertools::Itertools;
 use tuple::*;
-use inflate::inflate_bytes;
-use error::*;
+use inflate::inflate_bytes_zlib;
 use std::mem;
 
-use object::{Object, Resolve};
-use primitive::{Primitive, Dictionary};
+use crate::error::*;
+use crate::object::{Object, Resolve};
+use crate::primitive::{Primitive, Dictionary};
 
 
 #[derive(Object, Debug, Clone)]
@@ -141,7 +141,7 @@ fn flate_decode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
     let columns = params.columns as usize;
 
     // First flate decode
-    let decoded = inflate_bytes(data)?;
+    let decoded = inflate_bytes_zlib(data)?;
 
     // Then unfilter (PNG)
     // For this, take the old out as input, and write output to out

@@ -7,11 +7,12 @@ mod parse_xref;
 pub use self::lexer::*;
 pub use self::parse_object::*;
 pub use self::parse_xref::*;
-use enc::decode_hex;
-use error::*;
 use self::lexer::{StringLexer};
-use primitive::{Primitive, Dictionary, PdfStream, PdfString};
-use object::{ObjNr, GenNr, PlainRef, Resolve};
+
+use crate::enc::decode_hex;
+use crate::error::*;
+use crate::primitive::{Primitive, Dictionary, PdfStream, PdfString};
+use crate::object::{ObjNr, GenNr, PlainRef, Resolve};
 
 /// Can parse stream but only if its dictionary does not contain indirect references.
 /// Use `parse_stream` if this is insufficient.

@@ -4,10 +4,10 @@ use std::fmt::{Display, Formatter};
 use std::mem::replace;
 use std::io;
 
-use error::*;
-use object::*;
-use parser::{Lexer, parse_with_lexer};
-use primitive::*;
+use crate::error::*;
+use crate::object::*;
+use crate::parser::{Lexer, parse_with_lexer};
+use crate::primitive::*;
 
 /// Operation in a PDF content stream.
 #[derive(Debug, Clone)]
@@ -62,7 +62,7 @@ impl Content {
                     // It's not an object/operand - treat it as an operator.
                     lexer.set_pos(backup_pos);
                     let operator = lexer.next()?.to_string();
-                    let mut operation = Operation::new(operator, replace(&mut buffer, Vec::new()));
+                    let operation = Operation::new(operator, replace(&mut buffer, Vec::new()));
                     // Give operands to operation and empty buffer.
                     content.operations.push(operation.clone());
                 }

@@ -1,11 +1,11 @@
 // Considering whether to impl Object and IndirectObject here.
 //
 
-use parser::lexer::*;
-use error::*;
-use primitive::{Primitive, PdfStream};
-use parser::{parse_with_lexer, parse_stream_with_lexer};
-use object::*;
+use crate::parser::lexer::*;
+use crate::error::*;
+use crate::primitive::{Primitive, PdfStream};
+use crate::parser::{parse_with_lexer, parse_stream_with_lexer};
+use crate::object::*;
 
 
 /// Parses an Object starting at the current position of `lexer`. Almost as

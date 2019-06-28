@@ -6,7 +6,7 @@ use std::str::FromStr;
 use std::ops::Range;
 use std::io::SeekFrom;
 
-use error::*;
+use crate::error::*;
 
 mod str;
 pub use self::str::StringLexer;

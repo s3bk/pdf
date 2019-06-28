@@ -1,14 +1,15 @@
 //! Models of PDF types
 
 use std::io;
-use object::*;
-use error::*;
-use content::Content;
-use font::Font;
-use file::File;
-use backend::Backend;
 use std::rc::Rc;
 use std::ops::Deref;
+
+use crate::object::*;
+use crate::error::*;
+use crate::content::Content;
+use crate::font::Font;
+use crate::file::File;
+use crate::backend::Backend;
 
 /// Node in a page tree - type is either `Page` or `PageTree`
 #[derive(Debug)]
@@ -325,7 +326,7 @@ pub enum RenderingIntent {
 
 
 #[derive(Object, Debug)]
-#[pdf(Type="XObject", Subtype="Form")]
+#[pdf(Type="XObject?", Subtype="Form")]
 pub struct FormDict {
     // TODO
 }

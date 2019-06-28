@@ -1,13 +1,13 @@
-use error::*;
-use num_traits::PrimInt;
-use parser::lexer::Lexer;
-use xref::{XRef, XRefSection};
-use file::XRefInfo;
-use primitive::{Primitive, Dictionary};
-use object::*;
-use parser::{parse_with_lexer};
-use parser::parse_object::{parse_indirect_stream};
+use crate::error::*;
+use crate::parser::lexer::Lexer;
+use crate::xref::{XRef, XRefSection};
+use crate::file::XRefInfo;
+use crate::primitive::{Primitive, Dictionary};
+use crate::object::*;
+use crate::parser::{parse_with_lexer};
+use crate::parser::parse_object::{parse_indirect_stream};
 
+use num_traits::PrimInt;
 
 // Just the part of Parser which reads xref sections from xref stream.
 /// Takes `&mut &[u8]` so that it can "consume" data as it reads
@@ -51,7 +51,7 @@ fn read_u64_from_stream(width: i32, data: &mut &[u8]) -> u64 {
 pub fn parse_xref_stream_and_trailer(lexer: &mut Lexer, resolve: &dyn Resolve) -> Result<(Vec<XRefSection>, Dictionary)> {
     let xref_stream = parse_indirect_stream(lexer, resolve)?.1;
     let trailer = xref_stream.info.clone();
-    let mut xref_stream = Stream::<XRefInfo>::from_primitive(Primitive::Stream(xref_stream), resolve)?;
+    let xref_stream = Stream::<XRefInfo>::from_primitive(Primitive::Stream(xref_stream), resolve)?;
     let mut data_left = xref_stream.data()?;
 
     let width = &xref_stream.w;

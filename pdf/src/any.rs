@@ -1,6 +1,6 @@
 use std::any::TypeId;
-use object::Object;
 use std::rc::Rc;
+use crate::object::Object;
 
 pub trait AnyObject {
     fn serialize(&self, out: &mut Vec<u8>);

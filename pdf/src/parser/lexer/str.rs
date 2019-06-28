@@ -1,5 +1,5 @@
 use std::iter::Iterator;
-use error::*;
+use crate::error::*;
 
 /// A lexer for PDF strings. Breaks the string up into single characters (`u8`)
 /// It's also possible to get the number of indices of the original array that was traversed by the

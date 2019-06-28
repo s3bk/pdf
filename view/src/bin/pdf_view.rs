@@ -35,6 +35,19 @@ use view::render_page;
 fn main() -> Result<(), PdfError> {
     env_logger::init();
     
+    let path = env::args().nth(1).expect("no file given");
+    println!("read: {}", path);
+    let file = PdfFile::<Vec<u8>>::open(&path)?;
+    
+    let num_pages = file.get_root().pages.count;
+    //let mut pages = file.pages();
+    let mut current_page = 0;
+    let page = file.get_page(current_page)?;
+                                     
+    // Render the canvas to screen.
+    let scene = render_page(&file, &*page);
+    let size = scene.view_box().size();
+    
     // Set up SDL2.
     let sdl_context = sdl2::init().unwrap();
     let video = sdl_context.video().unwrap();
@@ -44,10 +57,10 @@ fn main() -> Result<(), PdfError> {
     gl_attributes.set_context_profile(GLProfile::Core);
     gl_attributes.set_context_version(3, 3);
 
-    let scale = 2.0;
+    let scale = Vector2F::splat(1.0);
     // Open a window.
-    let window_size = Vector2I::new(1800, 1000);
-    let window = video.window("Text example", window_size.x() as u32, window_size.y() as u32)
+    let window_size = (size * scale).to_i32();
+    let mut window = video.window("Probably Distorted File", window_size.x() as u32, window_size.y() as u32)
                       .opengl()
                       .build()
                       .unwrap();
@@ -64,29 +77,34 @@ fn main() -> Result<(), PdfError> {
                                      DestFramebuffer::full_window(window_size),
                                      RendererOptions { background_color: Some(ColorF::white()) });
 
-    let path = env::args().nth(1).expect("no file given");
-    println!("read: {}", path);
-    let file = PdfFile::<Vec<u8>>::open(&path)?;
-    
-    //let num_pages = file.get_root().pages.count;
-    //let mut pages = file.pages();
-    let page = file.get_page(0)?;
-                                     
-    // Render the canvas to screen.
-    let scene = SceneProxy::from_scene(render_page(&file, &*page), RayonExecutor);
-    scene.build_and_render(&mut renderer, BuildOptions::default());
+    let proxy = SceneProxy::from_scene(scene, RayonExecutor);
+    proxy.build_and_render(&mut renderer, BuildOptions::default());
     window.gl_swap_window();
 
     // Wait for a keypress.
     let mut event_pump = sdl_context.event_pump().unwrap();
     loop {
+        let mut needs_update = false;
         match event_pump.wait_event() {
             Event::Quit {..} | Event::KeyDown { keycode: Some(Keycode::Escape), .. } => break,
+            Event::KeyDown { keycode: Some(Keycode::Right), .. } => {
+                current_page = (num_pages - 1).min(current_page + 1);
+                needs_update = true;
+            }
+            Event::KeyDown { keycode: Some(Keycode::Left), .. } => {
+                current_page = (0).max(current_page - 1);
+                needs_update = true;
+            }
             e => {
-                scene.build_and_render(&mut renderer, BuildOptions::default());
+                proxy.build_and_render(&mut renderer, BuildOptions::default());
                 window.gl_swap_window();
                 println!("{:?}", e);
             }
+        }
+        if needs_update {
+            let page = file.get_page(current_page)?;
+            let scene = render_page(&file, &*page);
+            proxy.replace_scene(scene);
         }
     }
     

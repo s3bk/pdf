@@ -1,10 +1,10 @@
 use memmap::Mmap;
-use error::*;
-use parser::Lexer;
-use parser::{read_xref_and_trailer_at, parse_indirect_object, parse};
-use xref::{XRef, XRefTable};
-use primitive::{Primitive, Dictionary};
-use object::*;
+use crate::error::*;
+use crate::parser::Lexer;
+use crate::parser::{read_xref_and_trailer_at, parse_indirect_object, parse};
+use crate::xref::{XRef, XRefTable};
+use crate::primitive::{Primitive, Dictionary};
+use crate::object::*;
 
 use std::ops::{
     RangeFull,

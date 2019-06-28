@@ -8,15 +8,7 @@
 #[macro_use] extern crate snafu;
 #[macro_use] extern crate log;
 
-extern crate num_traits;
-extern crate inflate;
-extern crate itertools;
-extern crate memmap;
-extern crate tuple;
-extern crate chrono;
-extern crate once_cell;
-extern crate tempfile;
-
+#[macro_export]
 #[macro_use] pub mod error;
 //mod macros;
 pub mod object;
@@ -33,9 +25,4 @@ pub mod any;
 mod enc;
 
 // pub use content::*;
-pub use error::PdfError;
-
-// hack to use ::pdf::object::Object in the derive
-pub mod pdf {
-    pub use super::*;
-}
+pub use crate::error::PdfError;

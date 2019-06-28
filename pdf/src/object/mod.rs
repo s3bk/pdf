@@ -8,9 +8,9 @@ mod stream;
 pub use self::types::*;
 pub use self::stream::*;
 
-use primitive::*;
-use error::*;
-use enc::*;
+use crate::primitive::*;
+use crate::error::*;
+use crate::enc::*;
 
 use std::io;
 use std::fmt;

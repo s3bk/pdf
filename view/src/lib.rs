@@ -1,4 +1,5 @@
 #[macro_use] extern crate log;
+#[macro_use] extern crate pdf;
 extern crate env_logger;
 
 use std::io::Write;
@@ -14,6 +15,7 @@ use pdf::primitive::Primitive;
 use pdf::backend::Backend;
 use pdf::font::FontType;
 use pdf::content::Operation;
+use pdf::error::{PdfError, Result};
 
 use pathfinder_content::color::ColorU;
 use pathfinder_geometry::{
@@ -38,11 +40,14 @@ macro_rules! ops_p {
 }
 macro_rules! ops {
     ($ops:ident, $($var:ident : $typ:ty),* => $block:block) => ({
-        let mut iter = $ops.iter();
-        $(
-            let $var: $typ = iter.next().unwrap().try_into().unwrap();
-        )*
-        $block
+        || -> Result<()> {
+            let mut iter = $ops.iter();
+            $(
+                let $var: $typ = iter.next().ok_or(PdfError::EOF)?.try_into()?;
+            )*
+            $block;
+            Ok(())
+        }();
     })
 }
 
@@ -179,7 +184,7 @@ impl<'a> TextState<'a> {
     fn draw_layout(&mut self, canvas: &mut CanvasRenderingContext2D, layout: Layout) {
         let transform = Transform2DF::row_major(self.horiz_scale, 0., 0., -1.0, 0., self.rise)
             .post_mul(&self.text_matrix);
-        dbg!(transform);
+        debug!("transform: {:?}", transform);
         
         let advance = layout.advance;
         canvas.fill_layout(&layout, transform);
@@ -242,8 +247,7 @@ fn render_text<'a, I>(iter: & mut I, canvas: & mut CanvasRenderingContext2D, fon
                     4 => FillAndClip,
                     5 => StrokeAndClip,
                     _ => {
-                        warn!("Invalid text render mode: {}", mode);
-                        continue;
+                        return Err(PdfError::Other { msg: format!("Invalid text render mode: {}", mode)});
                     }
                 }
             }),
@@ -292,11 +296,10 @@ fn render_text<'a, I>(iter: & mut I, canvas: & mut CanvasRenderingContext2D, fon
                 state.next_line();
                 state.draw_text(canvas, text);
             }),
-            "TJ" => {
-                let arr = ops[0].as_array().expect("not an array");
+            "TJ" => ops!(ops, array: &[Primitive] => {
                 let mut layout = LineLayout::new(&state);
                 
-                for arg in arr {
+                for arg in array {
                     match arg {
                         Primitive::String(ref data) => {
                             for &b in data.as_bytes() {
@@ -310,12 +313,10 @@ fn render_text<'a, I>(iter: & mut I, canvas: & mut CanvasRenderingContext2D, fon
                     }
                 }
                 state.draw_layout(canvas, layout.to_layout());
-            }
+            }),
             _ => {}
         }
     }
-    
-    canvas.restore();
 }
 
 pub fn render_page<B: Backend>(file: &PdfFile<B>, page: &Page) -> Scene {
@@ -327,7 +328,8 @@ pub fn render_page<B: Backend>(file: &PdfFile<B>, page: &Page) -> Scene {
     
     let mut canvas = CanvasRenderingContext2D::new(CanvasFontContext::from_system_source(), rect.size());
     canvas.stroke_rect(RectF::new(Vector2F::default(), rect.size()));
-    canvas.set_current_transform(&Transform2DF::row_major(1.0, 0.0, 0.0, -1.0, -left, top));
+    let root_tansformation = Transform2DF::row_major(1.0, 0.0, 0.0, -1.0, -left, top);
+    canvas.set_current_transform(&root_tansformation);
     debug!("transform: {:?}", canvas.current_transform());
     
     let font_path = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join("fonts/MinionPro-Regular.otf");
@@ -342,7 +344,7 @@ pub fn render_page<B: Backend>(file: &PdfFile<B>, page: &Page) -> Scene {
     
     let mut fonts = HashMap::new();
     for (name, font) in resources.iter().flat_map(|r| r.fonts()) {
-        dbg!((&name, &font));
+        debug!("{} -> {:?}", name, font);
         if let Some(Ok(data)) = font.data() {
             ::std::fs::File::create(&format!("/tmp/font_{}", name)).unwrap().write_all(data).unwrap();
             fonts.insert(
@@ -361,6 +363,7 @@ pub fn render_page<B: Backend>(file: &PdfFile<B>, page: &Page) -> Scene {
     
     let mut iter = page.contents.as_ref().expect("no contents").operations.iter();
     while let Some(op) = iter.next() {
+        debug!("transform: {:?}", canvas.current_transform());
         debug!("{}", op);
         let ref ops = op.operands;
         match op.operator.as_str() {
@@ -488,12 +491,10 @@ pub fn render_page<B: Backend>(file: &PdfFile<B>, page: &Page) -> Scene {
             }
             "cs" => { // color space
             }
-            "gs" => { // graphics state from dict
-                ops!(ops, dict: &str => {
-                
-                });
+            "BT" => {
+                let graphics_transformation = canvas.current_transform();
+                render_text(&mut iter, &mut canvas, &fonts, &default_font);
             }
-            "BT" => render_text(&mut iter, &mut canvas, &fonts, &default_font),
             _ => {}
         }
     }
