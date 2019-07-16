@@ -7,10 +7,10 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-otf = { path = "../../otf" }
+otf = "*" # { path = "../../otf" }
 sfnt = "0.12"
-rusttype = { path = "../../rusttype" }
-pathfinder_canvas = { path = "../../pathfinder/canvas" }
-pathfinder_export = { path = "../../pathfinder/export" }
-pathfinder_geometry = { path = "../../pathfinder/geometry" }
+rusttype = "*" #{ path = "../../rusttype" }
+pathfinder_canvas = { git = "https://github.com/s3bk/pathfinder/", branch="local-skribo" }
+pathfinder_export = { git = "https://github.com/s3bk/pathfinder/", branch="local-skribo" }
+pathfinder_geometry = { git = "https://github.com/s3bk/pathfinder/", branch="local-skribo" }
 stb_truetype = "0.2.2"
