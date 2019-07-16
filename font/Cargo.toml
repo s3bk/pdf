@@ -7,7 +7,7 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-otf = "*" # { path = "../../otf" }
+otf = { git = "https://github.com/glyph-rs/otf" } # { path = "../../otf" }
 sfnt = "0.12"
 rusttype = "*" #{ path = "../../rusttype" }
 pathfinder_canvas = { git = "https://github.com/s3bk/pathfinder/", branch="local-skribo" }
