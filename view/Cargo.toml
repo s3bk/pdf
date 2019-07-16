@@ -28,3 +28,7 @@ git = "https://github.com/pcwalton/font-kit/"
 
 [dependencies.skribo]
 git = "https://github.com/s3bk/skribo"
+
+[[bin]]
+view = "src/bin/pdf_view.rs"
+pdf2svg = "src/bin/pdf2svg.rs"
