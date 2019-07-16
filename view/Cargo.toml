@@ -30,5 +30,7 @@ git = "https://github.com/pcwalton/font-kit/"
 git = "https://github.com/s3bk/skribo"
 
 [[bin]]
-view = "src/bin/pdf_view.rs"
-pdf2svg = "src/bin/pdf2svg.rs"
+name = "pdf_view"
+
+[[bin]]
+name = "pdf2svg"
