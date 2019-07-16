@@ -3,8 +3,6 @@ members = [
     "derive",
     "pdf",
     "view",
-    "examples"
+    "examples",
+    "font"
 ]
-
-[patch.crates-io]
-font-kit = { path = "../font-kit" }
