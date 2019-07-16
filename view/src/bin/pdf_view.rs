@@ -30,7 +30,7 @@ use env_logger;
 use pdf::file::File as PdfFile;
 use pdf::object::*;
 use pdf::error::PdfError;
-use view::render_page;
+use view::Cache;
 
 fn main() -> Result<(), PdfError> {
     env_logger::init();
@@ -39,13 +39,12 @@ fn main() -> Result<(), PdfError> {
     println!("read: {}", path);
     let file = PdfFile::<Vec<u8>>::open(&path)?;
     
-    let num_pages = file.get_root().pages.count;
-    //let mut pages = file.pages();
+    let pages: Vec<_> = file.pages().filter_map(|p| p.ok()).collect();
+    let num_pages = pages.len();
     let mut current_page = 0;
-    let page = file.get_page(current_page)?;
-                                     
+    let mut cache = Cache::new();
     // Render the canvas to screen.
-    let scene = render_page(&file, &*page);
+    let scene = cache.render_page(&file, &pages[current_page])?;
     let size = scene.view_box().size();
     
     // Set up SDL2.
@@ -87,24 +86,32 @@ fn main() -> Result<(), PdfError> {
         let mut needs_update = false;
         match event_pump.wait_event() {
             Event::Quit {..} | Event::KeyDown { keycode: Some(Keycode::Escape), .. } => break,
-            Event::KeyDown { keycode: Some(Keycode::Right), .. } => {
-                current_page = (num_pages - 1).min(current_page + 1);
-                needs_update = true;
+            Event::KeyDown { keycode: Some(keycode), .. } => {
+                match keycode {
+                    Keycode::Left => {
+                        current_page = (0).max(current_page - 1);
+                        needs_update = true;
+                    }
+                    Keycode::Right => {
+                        current_page = (num_pages - 1).min(current_page + 1);
+                        needs_update = true;
+                    }
+                    _ => {}
+                }
             }
-            Event::KeyDown { keycode: Some(Keycode::Left), .. } => {
-                current_page = (0).max(current_page - 1);
-                needs_update = true;
-            }
-            e => {
+            Event::KeyUp { .. } => {}
+            Event::Window { win_event: Exposed, .. } => {
                 proxy.build_and_render(&mut renderer, BuildOptions::default());
                 window.gl_swap_window();
-                println!("{:?}", e);
             }
+            e => println!("{:?}", e)
         }
         if needs_update {
-            let page = file.get_page(current_page)?;
-            let scene = render_page(&file, &*page);
+            println!("showing page {}", current_page);
+            let scene = cache.render_page(&file, &pages[current_page])?;
             proxy.replace_scene(scene);
+            proxy.build_and_render(&mut renderer, BuildOptions::default());
+            window.gl_swap_window();
         }
     }
     
