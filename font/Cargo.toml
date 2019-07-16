@@ -1,0 +1,16 @@
+[package]
+name = "font"
+version = "0.1.0"
+authors = ["Sebastian Köln <sebk@rynx.org>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+otf = { path = "../../otf" }
+sfnt = "0.12"
+rusttype = { path = "../../rusttype" }
+pathfinder_canvas = { path = "../../pathfinder/canvas" }
+pathfinder_export = { path = "../../pathfinder/export" }
+pathfinder_geometry = { path = "../../pathfinder/geometry" }
+stb_truetype = "0.2.2"
