@@ -1,46 +1,50 @@
 use std::error::Error;
 use pathfinder_canvas::Path2D;
 use pathfinder_geometry::vector::Vector2F;
-use rusttype::{GlyphId};
+use stb_truetype::FontInfo;
 use stb_truetype::VertexType;
-use crate::Font;
+use crate::{Font, Glyph};
 
 pub struct TrueTypeFont<'a> {
-    font: rusttype::Font<'a>
+    font: FontInfo<&'a [u8]>
 }
 impl<'a> TrueTypeFont<'a> {
     pub fn parse(data: &'a [u8]) -> Result<Self, Box<dyn Error>> {
-        let font = rusttype::Font::from_bytes(data)?;
+        let font = FontInfo::new(data, 0).expect("can't pase font");
         Ok(TrueTypeFont { font })
     }
 }
 impl<'a> Font for TrueTypeFont<'a> {
     fn num_glyphs(&self) -> u32 {
-        self.font.glyph_count() as u32
+        self.font.get_num_glyphs()
     }
-    fn glyph(&self, id: u32) -> Result<Path2D, Box<dyn Error>> {
-        let glyph_scale = 1. / self.font.units_per_em() as f32;
-        let scale_vector = Vector2F::new(glyph_scale, glyph_scale);
-        
+    fn font_matrix(&self) -> Transform2F {
+        let scale = 1.0 / self.font.units_per_em() as f32;
+        Transform2F::row_major(scale, 0., 0., scale, 0., 0.)
+    }
+    fn glyph(&self, id: u32) -> Result<Glyph, Box<dyn Error>> {
         let mut path = Path2D::new();
     
-        let glyph = self.font.glyph(GlyphId(id)).standalone();
-        if let Some(shape) = glyph.get_data().as_ref().and_then(|data| data.shape.as_ref()) {
+        if let Some(shape) = self.font.get_glyph_shape(id)
             for vertex in shape {
-                let p = Vector2F::new(vertex.x as _, vertex.y as _) * scale_vector;
+                let p = Vector2F::new(vertex.x as _, vertex.y as _);
                 
                 match vertex.vertex_type() {
                     VertexType::MoveTo => path.move_to(p),
                     VertexType::LineTo => path.line_to(p),
                     VertexType::CurveTo => {
-                        let c = Vector2F::new(vertex.cx as _, vertex.cy as _) * scale_vector;
+                        let c = Vector2F::new(vertex.cx as _, vertex.cy as _);
                         path.quadratic_curve_to(c, p);
                     }
                 }
             }
             path.close_path();
         }
+        let width = font.get_glyph_h_metrics(id).advance_width;
         
-        Ok(path)
+        Ok(Glyph {
+            width,
+            path
+        })
     }
 }

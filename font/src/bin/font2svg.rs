@@ -9,11 +9,13 @@ use pathfinder_export::{Export, FileFormat};
 use font::{Font, TrueTypeFont, CffFont};
 
 fn main() -> Result<(), Box<dyn Error>> {
+    env_logger::init();
+
     let args: Vec<String> = env::args().collect();
     let font_data = fs::read(args[1].as_str())?;
     let font: Box<dyn Font> = match args[2].as_str() {
-        "cff" => Box::new(CffFont::parse(&font_data)?) as _,
-        "otf" => Box::new(CffFont::parse_opentype(&font_data)?) as _,
+        "cff" => Box::new(CffFont::parse(&font_data, 0)?) as _,
+        "otf" => Box::new(CffFont::parse_opentype(&font_data, 0)?) as _,
         "tt" => Box::new(TrueTypeFont::parse(&font_data)?) as _,
         _ => panic!("unsupported format")
     };
@@ -33,12 +35,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         let y = (gid as u32 / glyphs_x);
         let x = (gid as u32 % glyphs_x);
         let offset = Vector2F::new(x as f32, (y + 1) as f32);
-        let transform = Transform2F::from_translation(offset) * Transform2F::from_scale(Vector2F::new(1.0, -1.0));
+        let transform = Transform2F::from_translation(offset) * Transform2F::from_scale(Vector2F::new(1.0, -1.0)) * font.font_matrix();
         canvas.set_current_transform(&transform);
     
         canvas.fill_path(font.glyph(gid)?);
     }
-    canvas.into_scene().export(&mut BufWriter::new(File::create("out.svg")?), FileFormat::SVG)?;
+    canvas.into_scene().export(&mut BufWriter::new(File::create("font.svg")?), FileFormat::SVG)?;
     
     Ok(())
 }
