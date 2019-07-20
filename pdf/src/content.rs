@@ -3,6 +3,7 @@ use std;
 use std::fmt::{Display, Formatter};
 use std::mem::replace;
 use std::io;
+use itertools::Itertools;
 
 use crate::error::*;
 use crate::object::*;
@@ -12,8 +13,8 @@ use crate::primitive::*;
 /// Operation in a PDF content stream.
 #[derive(Debug, Clone)]
 pub struct Operation {
-	pub operator: String,
-	pub operands: Vec<Primitive>,
+    pub operator: String,
+    pub operands: Vec<Primitive>,
 }
 
 impl Operation {
@@ -33,7 +34,7 @@ pub struct Content {
 }
 
 impl Content {
-    fn parse_from(data: &[u8], resolve: &dyn Resolve) -> Result<Content> {
+    fn parse_from(data: &[u8], resolve: &impl Resolve) -> Result<Content> {
         {
             use std::io::Write;
             let mut f = std::fs::OpenOptions::new()
@@ -81,7 +82,7 @@ impl Object for Content {
     /// Write object as a byte stream
     fn serialize<W: io::Write>(&self, _out: &mut W) -> Result<()> {unimplemented!()}
     /// Convert primitive to Self
-    fn from_primitive(p: Primitive, resolve: &dyn Resolve) -> Result<Self> {
+    fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         type ContentStream = Stream<()>;
         
         match p {
@@ -116,10 +117,6 @@ impl Display for Content {
 
 impl Display for Operation {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        write!(f, "Operation: {} (", self.operator)?;
-        for operand in &self.operands {
-            write!(f, "{:?}, ", operand)?;
-        }
-        write!(f, ")\n")
+        write!(f, "{} : {}", self.operator, self.operands.iter().format(", "))
     }
 }

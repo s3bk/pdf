@@ -27,8 +27,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let file = File::<Vec<u8>>::open(&path)?;
     
     let mut out = String::new();
-    file.pages(|_, page| {
-        for content in &page.contents {
+    for page in file.pages() {
+        for content in &page.unwrap().contents {
             for &Operation { ref operator, ref operands } in &content.operations {
                 // println!("{} {:?}", operator, operands);
                 match operator.as_str() {
@@ -37,7 +37,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
             }
         }
-    }, 0 .. 10);
+    }
     println!("{}", out);
     
     Ok(())

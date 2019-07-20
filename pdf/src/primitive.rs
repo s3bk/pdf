@@ -7,7 +7,7 @@ use std::ops::{Index, Range};
 use chrono::{DateTime, FixedOffset};
 use std::ops::Deref;
 use std::convert::TryInto;
-
+use itertools::Itertools;
 
 #[derive(Clone, Debug)]
 pub enum Primitive {
@@ -21,6 +21,23 @@ pub enum Primitive {
     Array (Vec<Primitive>),
     Reference (PlainRef),
     Name (String),
+}
+
+impl fmt::Display for Primitive {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Primitive::Null => write!(f, "null"),
+            Primitive::Integer(i) => i.fmt(f),
+            Primitive::Number(n) => n.fmt(f),
+            Primitive::Boolean(b) => b.fmt(f),
+            Primitive::String(ref s) => write!(f, "{:?}", s),
+            Primitive::Stream(ref s) => write!(f, "stream"),
+            Primitive::Dictionary(ref d) => d.fmt(f),
+            Primitive::Array(ref arr) => write!(f, "[{}]", arr.iter().format(", ")),
+            Primitive::Reference(r) => write!(f, "@{}", r.id),
+            Primitive::Name(ref s) => write!(f, "/{}", s)
+        }
+    }
 }
 
 /// Primitive Dictionary type.
@@ -87,9 +104,14 @@ impl fmt::Debug for Dictionary {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(f, "{{")?;
         for (k, v) in self {
-            writeln!(f, "{:>15}: {:?}", k, v)?;
+            writeln!(f, "{:>15}: {}", k, v)?;
         }
         write!(f, "}}")
+    }
+}
+impl fmt::Display for Dictionary {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "<{}>", self.iter().format_with(", ", |(k, v), f| f(&format_args!("{}={}", k, v))))
     }
 }
 impl<'a> Index<&'a str> for Dictionary {
@@ -127,7 +149,7 @@ impl Object for PdfStream {
         writeln!(out, "\nendstream");
         Ok(())
     }
-    fn from_primitive(p: Primitive, resolve: &dyn Resolve) -> Result<Self> {
+    fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         match p {
             Primitive::Stream (stream) => Ok(stream),
             Primitive::Reference (r) => PdfStream::from_primitive(resolve.resolve(r)?, resolve),
@@ -150,7 +172,7 @@ macro_rules! unexpected_primitive {
 /// Primitive String type.
 #[derive(Clone)]
 pub struct PdfString {
-    data: Vec<u8>,
+    pub data: Vec<u8>,
 }
 impl fmt::Debug for PdfString {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -179,11 +201,16 @@ impl Object for PdfString {
         }
         Ok(())
     }
-    fn from_primitive(p: Primitive, _: &dyn Resolve) -> Result<Self> {
+    fn from_primitive(p: Primitive, _: &impl Resolve) -> Result<Self> {
         match p {
             Primitive::String (string) => Ok(string),
             _ => unexpected_primitive!(String, p.get_debug_name()),
         }
+    }
+}
+impl AsRef<[u8]> for PdfString {
+    fn as_ref(&self) -> &[u8] {
+        self.as_bytes()
     }
 }
 
@@ -272,14 +299,14 @@ impl Primitive {
         }
     }
     /// Doesn't accept a Reference
-    pub fn to_array(self, _r: &dyn Resolve) -> Result<Vec<Primitive>> {
+    pub fn to_array(self, _r: &impl Resolve) -> Result<Vec<Primitive>> {
         match self {
             Primitive::Array(v) => Ok(v),
             // Primitive::Reference(id) => r.resolve(id)?.to_array(r),
             p => unexpected_primitive!(Array, p.get_debug_name())
         }
     }
-    pub fn to_dictionary(self, r: &dyn Resolve) -> Result<Dictionary> {
+    pub fn to_dictionary(self, r: &impl Resolve) -> Result<Dictionary> {
         match self {
             Primitive::Dictionary(dict) => Ok(dict),
             Primitive::Reference(id) => r.resolve(id)?.to_dictionary(r),
@@ -301,7 +328,7 @@ impl Primitive {
         }
     }
     /// Doesn't accept a Reference
-    pub fn to_stream(self, _r: &dyn Resolve) -> Result<PdfStream> {
+    pub fn to_stream(self, _r: &impl Resolve) -> Result<PdfStream> {
         match self {
             Primitive::Stream (s) => Ok(s),
             // Primitive::Reference (id) => r.resolve(id)?.to_stream(r),
@@ -374,6 +401,19 @@ impl<'a> TryInto<&'a [Primitive]> for &'a Primitive {
         self.as_array()
     }
 }
+impl<'a> TryInto<&'a [u8]> for &'a Primitive {
+    type Error = PdfError;
+    fn try_into(self) -> Result<&'a [u8]> {
+        match self {
+            Primitive::Name(ref s) => Ok(s.as_bytes()),
+            Primitive::String(ref s) => Ok(s.as_bytes()),
+            ref p => Err(PdfError::UnexpectedPrimitive {
+                expected: "Name or String",
+                found: p.get_debug_name()
+            })
+        }
+    }
+}
 impl<'a> TryInto<&'a str> for &'a Primitive {
     type Error = PdfError;
     fn try_into(self) -> Result<&'a str> {
@@ -395,7 +435,7 @@ impl<T: Object> Object for Option<T> {
         // handle Options. 
         unimplemented!();
     }
-    fn from_primitive(p: Primitive, r: &dyn Resolve) -> Result<Self> {
+    fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
         match p {
             Primitive::Null => Ok(None),
             p => match T::from_primitive(p, r) {
@@ -419,7 +459,7 @@ impl Object for DateTime<FixedOffset> {
         // TODO: smal/avg amount of work.
         unimplemented!();
     }
-    fn from_primitive(p: Primitive, _: &dyn Resolve) -> Result<Self> {
+    fn from_primitive(p: Primitive, _: &impl Resolve) -> Result<Self> {
         use chrono::{NaiveDateTime, NaiveDate, NaiveTime};
         match p {
             Primitive::String (PdfString {data}) => {

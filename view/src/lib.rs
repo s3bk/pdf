@@ -14,11 +14,10 @@ use pdf::file::File as PdfFile;
 use pdf::object::*;
 use pdf::primitive::Primitive;
 use pdf::backend::Backend;
-use pdf::font::Font;
+use pdf::font::Font as PdfFont;
 use pdf::content::Operation;
 use pdf::error::{PdfError, Result};
 use pdf::encoding::{Encoding, Decoder};
-use freetype::freetype::FT_Encoding;
 
 use pathfinder_content::color::ColorU;
 use pathfinder_geometry::{
@@ -26,9 +25,8 @@ use pathfinder_geometry::{
 };
 use pathfinder_canvas::{CanvasRenderingContext2D, CanvasFontContext, Path2D, FillStyle};
 use pathfinder_renderer::scene::Scene;
-use font_kit::loaders::freetype::{Font};
 use euclid::Vector2D;
-use skribo::{Glyph, Layout, FontRef};
+use font::Font;
 
 macro_rules! ops_p {
     ($ops:ident, $($point:ident),* => $block:block) => ({
@@ -72,7 +70,7 @@ fn cymk2fill(c: f32, y: f32, m: f32, k: f32) -> FillStyle {
 
 #[derive(Clone)]
 struct FontEntry {
-    font: Font,
+    font: Box<Font>,
     subtype: FontType,
     decoder: Decoder,
     widths: Box<[f32; 256]>
@@ -104,28 +102,37 @@ impl<'a> LineLayout<'a> {
             advance: Vector2D::zero()
         }
     }
-    fn add_byte(&mut self, b: u8) {
-        let font = &self.font.font;
-        if let Some(glyph_id) = font.glyph_for_char(b as char) {
-            self.glyphs.push(Glyph {
-                font: self.fontref.clone(),
-                glyph_id,
-                offset: self.advance
-            });
-            
-        } else {
-            info!("{}: can't find char 0x{:02X}", self.font.font.full_name(), b);
+    
+    fn add_bytes_cid(&mut self, data: &[u8])
+    
+    fn add_bytes(&mut self, data: &[u8]) {
+        if self.font.is_cid {
+            return self.add_bytes_cid(bytes);
         }
         
-        let dx = match b {
-            b' ' => self.state.word_space,
-            _   => self.state.char_space
-        };
-        let glyph_width = self.font.widths[b as usize];
-        if glyph_width == 0.0 {
-            info!("No glyph width for char 0x{:02X}", b);
+        let font = &self.font.font;
+        for b in data.bytes() {
+            if let Some(glyph_id) = font.glyph_for_char(b as char) {
+                self.glyphs.push(Glyph {
+                    font: self.fontref.clone(),
+                    glyph_id,
+                    offset: self.advance
+                });
+                
+            } else {
+                info!("{}: can't find char 0x{:02X}", self.font.font.full_name(), b);
+            }
+            
+            let dx = match b {
+                b' ' => self.state.word_space,
+                _   => self.state.char_space
+            };
+            let glyph_width = self.font.widths[b as usize];
+            if glyph_width == 0.0 {
+                info!("No glyph width for char 0x{:02X}", b);
+            }
+            self.advance.x += dx + glyph_width * self.scale;
         }
-        self.advance.x += dx + glyph_width * self.scale;
     }
     fn advance(&mut self, offset: f32) {
         self.advance.x += offset;
@@ -214,53 +221,51 @@ impl Cache {
             fonts: HashMap::new()
         }
     }
-    fn load_built_in_font(&mut self, font: &PdfFont) -> Option<Font> {
-        if let FontData::Standard(filename) = font.data {
+    fn load_built_in_font(&mut self, font: &PdfFont) -> Option<Box<Font>> {
+        font.standard_font().map(|filename| {
             let font_path = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap()
                 .join("fonts")
                 .join(filename);
-            
-            info!("font path: {:?}", &font_path);
-            
-            Some(Font::from_path(font_path, 0).expect("can't open font"))
-        } else {
-            None
-        }
+            let data = fs::read(font_path).unwrap();
+            match filename.rsplit(".").nth(0).unwrap() {
+                "otf" => font::opentype(data),
+                "ttf" => font::truetype(data),
+                "PFB" => font::type1(data),
+                e => panic!("unknown file extension .{}", ext)
+            }
+        })
     }
-    fn load_font(&mut self, font: &PdfFont) {
-        if self.fonts.get(&font.name).is_some() {
+    fn load_font(&mut self, pdf_font: &PdfFont) {
+        if self.fonts.get(&pdf_font.name).is_some() {
             return;
         }
-        dbg!(font);
-        let mut ft_font = match (self.load_built_in_font(&font), font.data()) {
+        dbg!(pdf_font);
+        let mut font = match (self.load_built_in_font(&pdf_font), pdf_font.data()) {
             (_, Some(Ok(data))) => {
-                let ext = match font.subtype {
+                let ext = match pdf_font.subtype {
                     FontType::Type1 | FontType::CIDFontType0 => ".pfb",
                     FontType::TrueType | FontType::CIDFontType2 => ".ttf",
                     _ => "",
                 };
-                ::std::fs::File::create(&format!("/tmp/fonts/{}{}", font.name, ext)).unwrap().write_all(data).unwrap();
-                Font::from_bytes(Arc::new(data.into()), 0).expect("failed to load embedded font")
+                ::std::fs::File::create(&format!("/tmp/fonts/{}{}", pdf_font.name, ext)).unwrap().write_all(data).unwrap();
+                
+                match pdf_font.subtype {
+                    FontType::TrueType | FontType::CIDFontType2 => TrueTypeFont::parse(data, 0)
+                        .expect("can't parse truetype font"),
+                    FontType::CIDFontType0 => CffFont::parse(data, 0).expect("can't parse CFF font")
+                    t => panic!("Fonttype {:?} not yet implemented")
+                }
             }
             (Some(f), _) => f,
             (None, Some(Err(e))) => panic!("can't decode font data: {:?}", e),
             (None, None) => {
                 dbg!(font);
-                warn!("No font data for {}. Glyphs will be missing.", font.name);
+                warn!("No font data for {}. Glyphs will be missing.", pdf_font.name);
                 return;
             }
         };
         
-        let encoding = font.encoding().clone();
-        debug!("font {} has encoding {:?}", font.name, encoding);
-        ft_font.set_char_map(match encoding {
-            Encoding::StandardEncoding => FT_Encoding::FT_ENCODING_ADOBE_STANDARD,
-            Encoding::WinAnsiEncoding => FT_Encoding::FT_ENCODING_ADOBE_LATIN_1,
-            Encoding::None => FT_Encoding::FT_ENCODING_NONE,
-            e => panic!("found encoding {:?}", e)
-        });
-        
-        let widths = match font.widths() {
+        let widths = match pdf_font.widths() {
             Ok(Some(widths)) => widths,
             Err(e) => {
                 error!("can't get font widths: {:?}", e);
@@ -268,7 +273,7 @@ impl Cache {
             }
             Ok(None) => {
                 let mut widths = [0.0; 256];
-                warn!("Font {} without widhts", font.name);
+                warn!("Font {} without widhts", pdf_font.name);
                 for b in 0u8 ..= 255 {
                     if let Some(glyph) = ft_font.glyph_for_char(b as char) {
                         if let Ok(v) = ft_font.advance(glyph) {
@@ -280,11 +285,17 @@ impl Cache {
             }
         };
         
+        let is_cid = match pdf_font.subtype {
+            FontType::CIDFontType0 || FontType::CIDFontType2 => true,
+            _ => false
+        };
+            
         self.fonts.insert(font.name.clone(), FontEntry {
-            font: ft_font,
+            font,
             subtype: font.subtype,
             decoder: Decoder::new(encoding),
-            widths: Box::new(widths)
+            widths: Box::new(widths),
+            is_cid
         });
     }
     fn get_font(&self, font_name: &str) -> Option<&FontEntry> {
@@ -573,9 +584,7 @@ impl Cache {
                         for arg in array {
                             match arg {
                                 Primitive::String(ref data) => {
-                                    for &b in data.as_bytes() {
-                                        layout.add_byte(b);
-                                    }
+                                    layout.add_bytes(data.as_bytes());
                                     text.extend(data.as_bytes());
                                 },
                                 p => {

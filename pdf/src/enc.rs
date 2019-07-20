@@ -44,7 +44,7 @@ pub enum StreamFilter {
     CCITTFaxDecode
 }
 impl StreamFilter {
-    pub fn from_kind_and_params(kind: &str, params: Dictionary, r: &dyn Resolve) -> Result<StreamFilter> {
+    pub fn from_kind_and_params(kind: &str, params: Dictionary, r: &impl Resolve) -> Result<StreamFilter> {
        let params = Primitive::Dictionary (params);
        Ok(
        match kind {

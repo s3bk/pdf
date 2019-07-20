@@ -5,15 +5,18 @@ use std::{str};
 use std::marker::PhantomData;
 use std::collections::HashMap;
 use std::cell::RefCell;
-use std::ops::Range;
 use std::rc::Rc;
 
 use crate::error::*;
 use crate::object::*;
-use crate::xref::XRefTable;
 use crate::primitive::{Primitive, Dictionary, PdfString};
 use crate::backend::Backend;
 use crate::any::Any;
+use crate::parser::Lexer;
+use crate::parser::{parse_indirect_object, parse};
+use crate::xref::{XRef, XRefTable};
+use crate::crypt::Decoder;
+use crate::crypt::CryptDict;
 
 pub struct PromisedRef<T> {
     inner:      PlainRef,
@@ -30,25 +33,128 @@ impl<'a, T> Into<Ref<T>> for &'a PromisedRef<T> {
     }
 }
 
-pub struct File<B: Backend> {
-    backend:    B,
-    trailer:    Trailer,
-    refs:       XRefTable,
+pub struct PagesIterator<'a, B: Backend> {
+    file: &'a File<B>,
+    stack: Vec<(Rc<PagesNode>, usize)>, // points to nodes that have not been processed yet,
+    error: bool
+}
+impl<'a, B: Backend> Iterator for PagesIterator<'a, B> {
+    type Item = Result<PageRc>;
+    fn next(&mut self) -> Option<Result<PageRc>> {
+        if self.error {
+            return None;
+        }
+        while let Some((node, pos)) = self.stack.pop() {
+            if let PagesNode::Tree(ref tree) = *node {
+                if pos < tree.kids.len() {
+                    // push the next index on the stack ...
+                    self.stack.push((node.clone(), pos+1));
+                    
+                    let rc = match self.file.get(tree.kids[pos]) {
+                        Ok(rc) => rc,
+                        Err(e) => {
+                            self.error = true;
+                            return Some(Err(e));
+                        }
+                    };
+                    match *rc {
+                        PagesNode::Tree(ref child) => self.stack.push((rc, 0)), // push the child on the stack
+                        PagesNode::Leaf(ref page) => return Some(Ok(PageRc(rc)))
+                    }
+                }
+            }
+        }
+        
+        None
+    }
+}
+
+struct Storage<B: Backend> {
+    // objects identical to those in the backend
+    cache: RefCell<HashMap<PlainRef, Any>>,
+    
+    // objects that differ from the backend
     changes:    HashMap<ObjNr, Primitive>,
-    cache:      RefCell<HashMap<PlainRef, Any>>
+    
+    refs:       XRefTable,
+    
+    decoder:    Option<Decoder>,
+    
+    backend: B
+}
+impl<B: Backend> Storage<B> {
+    fn new(backend: B, refs: XRefTable) -> Storage<B> {
+        Storage {
+            backend,
+            refs,
+            cache: RefCell::new(HashMap::new()),
+            changes: HashMap::new(),
+            decoder: None
+        }
+    }
+}
+impl<B: Backend> Resolve for Storage<B> {
+    fn resolve(&self, r: PlainRef) -> Result<Primitive> {
+        match self.changes.get(&r.id) {
+            Some(ref p) => Ok((*p).clone()),
+            None => match self.refs.get(r.id)? {
+                XRef::Raw {pos, gen_nr} => {
+                    let mut lexer = Lexer::new(self.backend.read(pos..)?);
+                    let mut p = parse_indirect_object(&mut lexer, self)?.1;
+                    if let Some(ref decoder) = self.decoder {
+                        match p {
+                            Primitive::Stream(ref mut stream) => decoder.decrypt(r.id, gen_nr, &mut stream.data),
+                            Primitive::String(ref mut s) => decoder.decrypt(r.id, gen_nr, &mut s.data),
+                            _ => {}
+                        }
+                    }
+                    Ok(p)
+                }
+                XRef::Stream {stream_id, index} => {
+                    let obj_stream = self.resolve(PlainRef {id: stream_id, gen: 0 /* TODO what gen nr? */})?;
+                    let obj_stream = ObjectStream::from_primitive(obj_stream, self)?;
+                    let slice = obj_stream.get_object_slice(index)?;
+                    parse(slice, self)
+                }
+                XRef::Free {..} => err!(PdfError::FreeObject {obj_nr: r.id}),
+                XRef::Promised => unimplemented!(),
+                XRef::Invalid => err!(PdfError::NullRef {obj_nr: r.id}),
+            }
+        }
+    }
+    fn get<T: Object>(&self, r: Ref<T>) -> Result<Rc<T>> {
+        let key = r.get_inner();
+        
+        if let Some(any) = self.cache.borrow().get(&key) {
+            match any.clone().downcast() {
+                Some(rc) => return Ok(rc),
+                None => bail!("expected {}, found {}", unsafe { std::intrinsics::type_name::<T>() }, any.type_name())
+            }
+        }
+        
+        let primitive = self.resolve(r.get_inner())?;
+        let obj = T::from_primitive(primitive, self)?;
+        let rc = Rc::new(obj);
+        self.cache.borrow_mut().insert(key, Any::new(rc.clone()));
+        
+        Ok(rc)
+    }
+}
+
+pub struct File<B: Backend> {
+    storage:    Storage<B>,
+    trailer:    Trailer,
+}
+impl<B: Backend> Resolve for File<B> {
+    fn resolve(&self, r: PlainRef) -> Result<Primitive> {
+        self.storage.resolve(r)
+    }
+    fn get<T: Object>(&self, r: Ref<T>) -> Result<Rc<T>> {
+        self.storage.get(r)
+    }
 }
 
 impl<B: Backend> File<B> {
-    pub fn new(b: B) -> File<B> {
-        File {
-            backend:    b,
-            trailer:    Trailer::default(),
-            refs:       XRefTable::new(1), // the root object,
-            changes:    HashMap::new(),
-            cache:      RefCell::new(HashMap::new())
-        }
-    }
-
     /// Opens the file at `path` and uses Vec<u8> as backend.
     pub fn open(path: &str) -> Result<File<Vec<u8>>> {
         // Read file contents to Vec
@@ -57,118 +163,42 @@ impl<B: Backend> File<B> {
         f.read_to_end(&mut backend)?;
 
         let (refs, trailer) = backend.read_xref_table_and_trailer()?;
-        let trailer = Trailer::from_primitive(Primitive::Dictionary(trailer), &|r| backend.resolve(&refs, r))?;
-        dbg!(&trailer.encrypt_dict);
+        let mut storage = Storage::new(backend, refs);
+
+        let trailer = Trailer::from_primitive(Primitive::Dictionary(trailer), &storage)?;
+        if let Some(ref dict) = trailer.encrypt_dict {
+            storage.decoder = Some(Decoder::default(&dict, trailer.id[0].as_bytes())?);
+        }
         
         Ok(File {
-            backend:    backend,
-            trailer:    trailer,
-            refs:       refs,
-            changes:    HashMap::new(),
-            cache:      RefCell::new(HashMap::new())
+            storage,
+            trailer,
         })
     }
-
 
     pub fn get_root(&self) -> &Catalog {
         &self.trailer.root
     }
-
-    fn resolve(&self, r: PlainRef) -> Result<Primitive> {
-        match self.changes.get(&r.id) {
-            Some(ref p) => Ok((*p).clone()),
-            None => self.backend.resolve(&self.refs, r)
+    
+    pub fn pages(&self) -> PagesIterator<B> {
+        PagesIterator {
+            error: false,
+            file: self,
+            stack: vec![(self.get_root().pages.clone(), 0)]
         }
     }
-
-    pub fn deref<T>(&self, r: Ref<T>) -> Result<Rc<T>>
-        where T: Object + 'static
-    {
-        use std::collections::hash_map::Entry;
-        match self.cache.borrow_mut().entry(r.get_inner()) {
-            Entry::Occupied(e) => {
-                Ok(e.get().clone().downcast().expect("wrong type"))
-            },
-            Entry::Vacant(e) => {
-                let primitive = self.resolve(r.get_inner())?;
-                let obj = T::from_primitive(primitive, &|id| self.resolve(id))?;
-                let rc = Rc::new(obj);
-                e.insert(Any::new(rc.clone()));
-                Ok(rc)
-            }
+    pub fn get_num_pages(&self) -> Result<u32> {
+        match *self.trailer.root.pages {
+            PagesNode::Tree(ref tree) => Ok(tree.count as u32),
+            PagesNode::Leaf(_) => Ok(1)
         }
-    }
-    fn walk_pagetree(&self, pos: &mut u32, tree: Ref<PagesNode>,
-        func: &mut impl FnMut(u32, &Page), range: &Range<u32>) -> Result<()>
-    {
-        let node = self.deref(tree)?;
-        match *node {
-            PagesNode::Tree(ref tree) => {
-                let end = *pos + tree.count as u32; // non-inclusive
-                if range.start < end && *pos < range.end {
-                    for &k in &tree.kids {
-                        self.walk_pagetree(pos, k, func, range)?;
-                        if *pos >= range.end {
-                            break;
-                        }
-                    }
-                }
-                
-                *pos = end;
-            },
-            PagesNode::Leaf(ref page) => {
-                if range.contains(pos) {
-                    info!("page {}", *pos);
-                    func(*pos, page);
-                }
-                *pos += 1;
-            }
-        }
-        Ok(())
-    }
-    pub fn pages(&self, mut func: impl FnMut(u32, &Page), range: Range<u32>) -> Result<()> {
-        let mut page_nr = 0;
-        dbg!(self.get_root()); 
-        for &k in &self.get_root().pages.kids {
-            dbg!(k);
-            self.walk_pagetree(&mut page_nr, k, &mut func, &range)?;
-        }
-        Ok(())
-    }
-    pub fn get_num_pages(&self) -> Result<i32> {
-        Ok(self.trailer.root.pages.count)
     }
     
-    // tail call
-    fn find_page(&self, pages: &PageTree, mut offset: i32, page_nr: i32) -> Result<PageRc> {
-        for &kid in &pages.kids {
-            // println!("{}/{} {:?}", offset, page_nr, kid);
-            let rc = self.deref(kid)?;
-            match *rc {
-                PagesNode::Tree(ref t) => {
-                    if offset + t.count < page_nr {
-                        offset += t.count;
-                    } else {
-                        return self.find_page(t, offset, page_nr);
-                    }
-                },
-                PagesNode::Leaf(_) => {
-                    if offset < page_nr {
-                        offset += 1;
-                    } else {
-                        assert_eq!(offset, page_nr);
-                        return Ok(PageRc(rc));
-                    }
-                }
-            }
-        }
-        Err(PdfError::PageNotFound {page_nr: page_nr})
-    }
-    pub fn get_page(&self, n: i32) -> Result<PageRc> {
+    pub fn get_page(&self, mut n: u32) -> Result<PageRc> {
         if n >= self.get_num_pages()? {
             return Err(PdfError::PageOutOfBounds {page_nr: n, max: self.get_num_pages()?});
         }
-        self.find_page(&self.trailer.root.pages, 0, n)
+        self.pages().nth(n as usize).unwrap()
     }
 
     /*
@@ -202,7 +232,7 @@ impl<B: Backend> File<B> {
     fn update_pages(&self, pages: &mut PageTree, mut offset: i32, page_nr: i32, page: Page) -> Result<()>  {
         for kid in &mut pages.kids.iter_mut() {
             // println!("{}/{} {:?}", offset, page_nr, kid);
-            match *(self.deref(kid)?) {
+            match *(self.get(kid)?) {
                 PagesNode::Tree(ref mut t) => {
                     if offset + t.count < page_nr {
                         offset += t.count;
@@ -266,7 +296,7 @@ impl<B: Backend> File<B> {
 }
 
     
-#[derive(Object, Default)]
+#[derive(Object)]
 pub struct Trailer {
     #[pdf(key = "Size")]
     pub highest_id:         i32,
@@ -278,7 +308,7 @@ pub struct Trailer {
     pub root:               Catalog,
 
     #[pdf(key = "Encrypt")]
-    pub encrypt_dict:       Option<Dictionary>,
+    pub encrypt_dict:       Option<CryptDict>,
 
     #[pdf(key = "Info")]
     pub info_dict:          Option<Dictionary>,
@@ -317,7 +347,7 @@ impl Object for XRefStream {
     fn serialize<W: io::Write>(&self, _out: &mut W) -> io::Result<()> {
         unimplemented!();
     }
-    fn from_primitive(p: Primitive, resolve: &dyn Resolve) -> Result<Self> {
+    fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         let stream = p.to_stream(resolve)?;
         let info = XRefInfo::from_primitive(Primitive::Dictionary (stream.info), resolve)?;
         let data = stream.data.clone();

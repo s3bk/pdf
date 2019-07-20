@@ -48,7 +48,7 @@ impl<I: Object + fmt::Debug> Object for Stream<I> {
     /// Write object as a byte stream
     fn serialize<W: io::Write>(&self, _: &mut W) -> Result<()> {unimplemented!()}
     /// Convert primitive to Self
-    fn from_primitive(p: Primitive, resolve: &dyn Resolve) -> Result<Self> {
+    fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         let PdfStream {info, data} = PdfStream::from_primitive(p, resolve)?;
         let info = StreamInfo::<I>::from_primitive(Primitive::Dictionary (info), resolve)?;
         
@@ -126,7 +126,7 @@ impl<T: Object> Object for StreamInfo<T> {
     fn serialize<W: io::Write>(&self, _out: &mut W) -> Result<()> {
         unimplemented!();
     }
-    fn from_primitive(p: Primitive, resolve: &dyn Resolve) -> Result<Self> {
+    fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         let mut dict = Dictionary::from_primitive(p, resolve)?;
 
         let _length = usize::from_primitive(
@@ -214,7 +214,7 @@ impl Object for ObjectStream {
     fn serialize<W: io::Write>(&self, _out: &mut W) -> Result<()> {
         unimplemented!();
     }
-    fn from_primitive(p: Primitive, resolve: &dyn Resolve) -> Result<ObjectStream> {
+    fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<ObjectStream> {
         let stream: Stream<ObjStmInfo> = Stream::from_primitive(p, resolve)?;
 
         let mut offsets = Vec::new();

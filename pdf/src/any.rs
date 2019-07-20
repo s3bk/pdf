@@ -44,4 +44,7 @@ impl Any {
     {
         Any(rc as _)
     }
+    pub fn type_name(&self) -> &'static str {
+        self.0.type_name()
+    }
 }

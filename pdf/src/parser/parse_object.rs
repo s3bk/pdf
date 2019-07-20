@@ -13,7 +13,7 @@ use crate::object::*;
 /// cannot dereference 
 
 
-pub fn parse_indirect_object(lexer: &mut Lexer, r: &dyn Resolve) -> Result<(PlainRef, Primitive)> {
+pub fn parse_indirect_object(lexer: &mut Lexer, r: &impl Resolve) -> Result<(PlainRef, Primitive)> {
     let obj_nr = lexer.next()?.to::<ObjNr>()?;
     let gen_nr = lexer.next()?.to::<GenNr>()?;
     lexer.next_expect("obj")?;
@@ -24,7 +24,7 @@ pub fn parse_indirect_object(lexer: &mut Lexer, r: &dyn Resolve) -> Result<(Plai
 
     Ok((PlainRef {id: obj_nr, gen: gen_nr}, obj))
 }
-pub fn parse_indirect_stream(lexer: &mut Lexer, r: &dyn Resolve) -> Result<(PlainRef, PdfStream)> {
+pub fn parse_indirect_stream(lexer: &mut Lexer, r: &impl Resolve) -> Result<(PlainRef, PdfStream)> {
     let obj_nr = lexer.next()?.to::<ObjNr>()?;
     let gen_nr = lexer.next()?.to::<GenNr>()?;
     lexer.next_expect("obj")?;

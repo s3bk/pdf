@@ -24,7 +24,7 @@ impl Object for PagesNode {
             PagesNode::Leaf (ref l) => l.serialize(out),
         }
     }
-    fn from_primitive(p: Primitive, r: &dyn Resolve) -> Result<PagesNode> {
+    fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<PagesNode> {
         let dict = Dictionary::from_primitive(p, r)?;
         match dict["Type"].clone().to_name()?.as_str() {
             "Page" => Ok(PagesNode::Leaf (Page::from_primitive(Primitive::Dictionary(dict), r)?)),
@@ -47,11 +47,11 @@ impl Deref for PageRc {
 }
 
 
-#[derive(Object, Default, Debug)]
+#[derive(Object, Debug)]
 pub struct Catalog {
 // Version: Name,
     #[pdf(key="Pages")]
-    pub pages: PageTree,
+    pub pages: Rc<PagesNode>,
 // PageLabels: number_tree,
     #[pdf(key="Names")]
     pub names: Option<NameDictionary>,
@@ -87,7 +87,7 @@ pub struct Catalog {
 #[pdf(Type = "Pages")]
 pub struct PageTree {
     #[pdf(key="Parent")]
-    pub parent: Option<Ref<PageTree>>,
+    pub parent: Option<Ref<PagesNode>>,
     #[pdf(key="Kids")]
     pub kids:   Vec<Ref<PagesNode>>,
     #[pdf(key="Count")]
@@ -110,7 +110,7 @@ pub struct PageTree {
 #[derive(Object, Debug)]
 pub struct Page {
     #[pdf(key="Parent")]
-    pub parent: Ref<PageTree>,
+    pub parent: Ref<PagesNode>,
 
     #[pdf(key="Resources")]
     pub resources: Option<Rc<Resources>>,
@@ -127,22 +127,21 @@ pub struct Page {
     #[pdf(key="Contents")]
     pub contents:   Option<Content>
 }
-fn inherit<T, F, B: Backend>(mut parent: Ref<PageTree>, file: &File<B>, f: F) -> Result<Option<T>>
-    where F: Fn(Rc<PageTree>) -> Option<T>
+fn inherit<T, F, B: Backend>(mut parent: Ref<PagesNode>, file: &File<B>, f: F) -> Result<Option<T>>
+    where F: Fn(&PageTree) -> Option<T>
 {
-    loop {
-        let page_tree = file.deref(parent)?;
-        
-        match (page_tree.parent, f(page_tree)) {
-            (_, Some(t)) => break Ok(Some(t)),
-            (Some(p), None) => parent = p,
-            (None, None) => break Ok(None)
+    while let PagesNode::Tree(ref page_tree) = *file.get(parent)? {
+        match (page_tree.parent, f(&page_tree)) {
+            (_, Some(t)) => return Ok(Some(t)),
+            (Some(ref p), None) => parent = *p,
+            (None, None) => return Ok(None)
         }
     }
+    bail!("bad parent")
 }
 
 impl Page {
-    pub fn new(parent: Ref<PageTree>) -> Page {
+    pub fn new(parent: Ref<PagesNode>) -> Page {
         Page {
             parent:     parent,
             media_box:  None,
@@ -192,19 +191,19 @@ pub struct PageLabel {
 #[derive(Object, Debug)]
 pub struct Resources {
     #[pdf(key="ExtGState")]
-    pub ext_g_state: Option<GraphicsStateParameters>,
+    pub graphics_states: BTreeMap<String, GraphicsStateParameters>,
     // color_space: Option<ColorSpace>,
     // pattern: Option<Pattern>,
     // shading: Option<Shading>,
     #[pdf(key="XObject")]
-    pub xobjects: Option<BTreeMap<String, XObject>>,
+    pub xobjects: BTreeMap<String, XObject>,
     // /XObject is a dictionary that map arbitrary names to XObjects
     #[pdf(key="Font")]
-    pub fonts: Option<BTreeMap<String, Font>>,
+    pub fonts: BTreeMap<String, Rc<Font>>,
 }
 impl Resources {
-    pub fn fonts(&self) -> impl Iterator<Item=(&str, &Font)> {
-        self.fonts.iter().flat_map(|b| b.iter()).map(|(k, v)| (k.as_str(), v))
+    pub fn fonts(&self) -> impl Iterator<Item=(&str, &Rc<Font>)> {
+        self.fonts.iter().map(|(k, v)| (k.as_str(), v))
     }
 }
 
@@ -226,21 +225,23 @@ pub enum LineJoin {
 /// `ExtGState`
 pub struct GraphicsStateParameters {
     #[pdf(key="LW")]
-    line_width: Option<f32>,
+    pub line_width: Option<f32>,
     
     #[pdf(key="LC")]
-    line_cap: Option<LineCap>,
+    pub line_cap: Option<LineCap>,
     
     #[pdf(key="LC")]
-    line_join: Option<LineJoin>,
+    pub line_join: Option<LineJoin>,
     
     #[pdf(key="ML")]
-    miter_limit: Option<f32>,
+    pub miter_limit: Option<f32>,
     
     // D : dash pattern
     #[pdf(key="RI")]
-    rendering_intent: Option<String>,
+    pub rendering_intent: Option<String>,
     
+    #[pdf(key="Font")]
+    pub font: Option<(Rc<Font>, f32)>
 }
 
 #[derive(Object, Debug)]
@@ -351,7 +352,7 @@ impl Object for Counter {
         out.write_all(style_code.as_bytes())?;
         Ok(())
     }
-    fn from_primitive(_: Primitive, _: &dyn Resolve) -> Result<Self> {
+    fn from_primitive(_: Primitive, _: &impl Resolve) -> Result<Self> {
         unimplemented!();
     }
 }
@@ -376,7 +377,7 @@ impl<T: Object> Object for NameTree<T> {
     fn serialize<W: io::Write>(&self, _out: &mut W) -> Result<()> {
         unimplemented!();
     }
-    fn from_primitive(p: Primitive, resolve: &dyn Resolve) -> Result<Self> {
+    fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         let mut dict = p.to_dictionary(resolve)?;
         
         // Quite long function..=
@@ -563,7 +564,7 @@ impl Object for Rect {
         write!(out, "[{} {} {} {}]", self.left, self.top, self.right, self.bottom)?;
         Ok(())
     }
-    fn from_primitive(p: Primitive, r: &dyn Resolve) -> Result<Self> {
+    fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
         let arr = p.to_array(r)?;
         if arr.len() != 4 {
             bail!("len != 4");

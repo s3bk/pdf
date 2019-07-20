@@ -1,9 +1,9 @@
 use memmap::Mmap;
 use crate::error::*;
 use crate::parser::Lexer;
-use crate::parser::{read_xref_and_trailer_at, parse_indirect_object, parse};
-use crate::xref::{XRef, XRefTable};
-use crate::primitive::{Primitive, Dictionary};
+use crate::parser::{read_xref_and_trailer_at};
+use crate::xref::{XRefTable};
+use crate::primitive::{Dictionary};
 use crate::object::*;
 
 use std::ops::{
@@ -35,7 +35,7 @@ pub trait Backend: Sized {
         let xref_offset = self.locate_xref_offset()?;
         let mut lexer = Lexer::new(self.read(xref_offset..)?);
         
-        let (xref_sections, trailer) = read_xref_and_trailer_at(&mut lexer, NO_RESOLVE)?;
+        let (xref_sections, trailer) = read_xref_and_trailer_at(&mut lexer, &NoResolve)?;
         
         let highest_id = trailer.get("Size")
             .ok_or_else(|| PdfError::MissingEntry {field: "Size".into(), typ: "XRefTable"})?
@@ -55,7 +55,7 @@ pub trait Backend: Sized {
         println!("READ XREF AND TABLE");
         while let Some(prev_xref_offset) = prev_trailer {
             let mut lexer = Lexer::new(self.read(prev_xref_offset as usize..)?);
-            let (xref_sections, trailer) = read_xref_and_trailer_at(&mut lexer, NO_RESOLVE)?;
+            let (xref_sections, trailer) = read_xref_and_trailer_at(&mut lexer, &NoResolve)?;
             
             for section in xref_sections {
                 refs.add_entries_from(section);
@@ -69,27 +69,6 @@ pub trait Backend: Sized {
             };
         }
         Ok((refs, trailer))
-    }
-    /// File needs this because it need a resolve function to parse the trailer before the
-    /// File has been created. However, it could also be useful for applications that are dealing with
-    /// objects manually.
-    fn resolve(&self, refs: &XRefTable, r: PlainRef) -> Result<Primitive> {
-        match refs.get(r.id)? {
-            XRef::Raw {pos, ..} => {
-                let mut lexer = Lexer::new(self.read(pos..)?);
-                Ok(parse_indirect_object(&mut lexer, &|r| self.resolve(refs, r))?.1)
-                // ^ NOTE: using self.resolve is tentative.. don't know if it leads to problems
-            }
-            XRef::Stream {stream_id, index} => {
-                let obj_stream = self.resolve(refs, PlainRef {id: stream_id, gen: 0 /* TODO what gen nr? */})?;
-                let obj_stream = ObjectStream::from_primitive(obj_stream, &|r| self.resolve(refs, r))?;
-                let slice = obj_stream.get_object_slice(index)?;
-                parse(slice, &|r| self.resolve(refs, r))
-            }
-            XRef::Free {..} => err!(PdfError::FreeObject {obj_nr: r.id}),
-            XRef::Promised => unimplemented!(),
-            XRef::Invalid => err!(PdfError::NullRef {obj_nr: r.id}),
-        }
     }
 }
 

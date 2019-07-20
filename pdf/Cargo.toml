@@ -17,6 +17,9 @@ Read, alter and write PDF files.
 [dependencies.pdf_derive]
 path = "../derive"
 
+[dependencies.adobe-cmap-parser]
+path = "../../adobe-cmap-parser"
+
 [dependencies]
 snafu = "0.4"
 isatty = "0.1"

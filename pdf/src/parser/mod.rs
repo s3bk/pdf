@@ -16,13 +16,13 @@ use crate::object::{ObjNr, GenNr, PlainRef, Resolve};
 
 /// Can parse stream but only if its dictionary does not contain indirect references.
 /// Use `parse_stream` if this is insufficient.
-pub fn parse(data: &[u8], r: &dyn Resolve) -> Result<Primitive> {
+pub fn parse(data: &[u8], r: &impl Resolve) -> Result<Primitive> {
     parse_with_lexer(&mut Lexer::new(data), r)
 }
 
 /// Recursive. Can parse stream but only if its dictionary does not contain indirect references.
 /// Use `parse_stream` if this is not sufficient.
-pub fn parse_with_lexer(lexer: &mut Lexer, r: &dyn Resolve) -> Result<Primitive> {
+pub fn parse_with_lexer(lexer: &mut Lexer, r: &impl Resolve) -> Result<Primitive> {
     let first_lexeme = lexer.next()?;
 
     let obj = if first_lexeme.equals(b"<<") {
@@ -147,12 +147,12 @@ pub fn parse_with_lexer(lexer: &mut Lexer, r: &dyn Resolve) -> Result<Primitive>
 }
 
 
-pub fn parse_stream(data: &[u8], resolve: &dyn Resolve) -> Result<PdfStream> {
+pub fn parse_stream(data: &[u8], resolve: &impl Resolve) -> Result<PdfStream> {
     parse_stream_with_lexer(&mut Lexer::new(data), resolve)
 }
 
 
-fn parse_stream_with_lexer(lexer: &mut Lexer, r: &dyn Resolve) -> Result<PdfStream> {
+fn parse_stream_with_lexer(lexer: &mut Lexer, r: &impl Resolve) -> Result<PdfStream> {
     let first_lexeme = lexer.next()?;
 
     let obj = if first_lexeme.equals(b"<<") {

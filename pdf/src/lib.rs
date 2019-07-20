@@ -3,12 +3,12 @@
 #![feature(custom_attribute)]
 #![feature(termination_trait_lib)]
 #![feature(core_intrinsics)]
+#![feature(try_trait)]
 
 #[macro_use] extern crate pdf_derive;
 #[macro_use] extern crate snafu;
 #[macro_use] extern crate log;
 
-#[macro_export]
 #[macro_use] pub mod error;
 //mod macros;
 pub mod object;
@@ -20,9 +20,11 @@ pub mod content;
 pub mod parser;
 pub mod font;
 pub mod any;
+pub mod encoding;
 
 // mod content;
 mod enc;
+pub mod crypt;
 
 // pub use content::*;
 pub use crate::error::PdfError;

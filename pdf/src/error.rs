@@ -92,19 +92,25 @@ pub enum PdfError {
     ObjStmOutOfBounds {index: usize, max: usize},
     
     #[snafu(display("Page out of bounds ({}/{}).", page_nr, max))]
-    PageOutOfBounds {page_nr: i32, max: i32},
+    PageOutOfBounds {page_nr: u32, max: u32},
     
     #[snafu(display("Page {} could not be found in the page tree.", page_nr))]
-    PageNotFound {page_nr: i32},
+    PageNotFound {page_nr: u32},
     
     #[snafu(display("Entry {} in xref table unspecified", id))]
     UnspecifiedXRefEntry {id: ObjNr},
+    
+    #[snafu(display("Invalid user password"))]
+    InvalidPassword,
     
     #[snafu(display("IO Error"))]
     Io { source: io::Error },
     
     #[snafu(display("{}", msg))]
-    Other { msg: String }
+    Other { msg: String },
+    
+    #[snafu(display("NoneError"))]
+    NoneError
 }
 impl PdfError {
     pub fn trace(&self) {
@@ -124,6 +130,11 @@ pub type Result<T, E=PdfError> = std::result::Result<T, E>;
 impl From<io::Error> for PdfError {
     fn from(source: io::Error) -> PdfError {
         PdfError::Io { source }
+    }
+}
+impl From<std::option::NoneError> for PdfError {
+    fn from(_: std::option::NoneError) -> PdfError {
+        PdfError::NoneError
     }
 }
 impl From<String> for PdfError {

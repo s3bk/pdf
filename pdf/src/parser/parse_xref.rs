@@ -48,7 +48,7 @@ fn read_u64_from_stream(width: i32, data: &mut &[u8]) -> u64 {
 
 
 /// Reads xref sections (from stream) and trailer starting at the position of the Lexer.
-pub fn parse_xref_stream_and_trailer(lexer: &mut Lexer, resolve: &dyn Resolve) -> Result<(Vec<XRefSection>, Dictionary)> {
+pub fn parse_xref_stream_and_trailer(lexer: &mut Lexer, resolve: &impl Resolve) -> Result<(Vec<XRefSection>, Dictionary)> {
     let xref_stream = parse_indirect_stream(lexer, resolve)?.1;
     let trailer = xref_stream.info.clone();
     let xref_stream = Stream::<XRefInfo>::from_primitive(Primitive::Stream(xref_stream), resolve)?;
@@ -70,7 +70,7 @@ pub fn parse_xref_stream_and_trailer(lexer: &mut Lexer, resolve: &dyn Resolve) -
 
 
 /// Reads xref sections (from table) and trailer starting at the position of the Lexer.
-pub fn parse_xref_table_and_trailer(lexer: &mut Lexer, resolve: &dyn Resolve) -> Result<(Vec<XRefSection>, Dictionary)> {
+pub fn parse_xref_table_and_trailer(lexer: &mut Lexer, resolve: &impl Resolve) -> Result<(Vec<XRefSection>, Dictionary)> {
     let mut sections = Vec::new();
     
     // Keep reading subsections until we hit `trailer`
@@ -102,7 +102,7 @@ pub fn parse_xref_table_and_trailer(lexer: &mut Lexer, resolve: &dyn Resolve) ->
     Ok((sections, trailer))
 }
 
-pub fn read_xref_and_trailer_at(lexer: &mut Lexer, resolve: &dyn Resolve) -> Result<(Vec<XRefSection>, Dictionary)> {
+pub fn read_xref_and_trailer_at(lexer: &mut Lexer, resolve: &impl Resolve) -> Result<(Vec<XRefSection>, Dictionary)> {
     let next_word = lexer.next()?;
     if next_word.equals(b"xref") {
         // Read classic xref table
