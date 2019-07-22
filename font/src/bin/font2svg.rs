@@ -6,7 +6,7 @@ use pathfinder_canvas::{CanvasFontContext, CanvasRenderingContext2D};
 use pathfinder_geometry::vector::Vector2F;
 use pathfinder_geometry::transform2d::Transform2F;
 use pathfinder_export::{Export, FileFormat};
-use font::{Font, TrueTypeFont, CffFont};
+use font::{Font, TrueTypeFont, CffFont, Type1Font};
 
 fn main() -> Result<(), Box<dyn Error>> {
     env_logger::init();
@@ -17,6 +17,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         "cff" => Box::new(CffFont::parse(&font_data, 0)?) as _,
         "otf" => Box::new(CffFont::parse_opentype(&font_data, 0)?) as _,
         "tt" => Box::new(TrueTypeFont::parse(&font_data)?) as _,
+        "type1" => Box::new(Type1Font::parse(&font_data)?) as _,
         _ => panic!("unsupported format")
     };
     
@@ -38,7 +39,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         let transform = Transform2F::from_translation(offset) * Transform2F::from_scale(Vector2F::new(1.0, -1.0)) * font.font_matrix();
         canvas.set_current_transform(&transform);
     
-        canvas.fill_path(font.glyph(gid)?);
+        canvas.fill_path(font.glyph(gid)?.path);
     }
     canvas.into_scene().export(&mut BufWriter::new(File::create("font.svg")?), FileFormat::SVG)?;
     

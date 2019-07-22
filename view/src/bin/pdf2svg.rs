@@ -1,3 +1,5 @@
+#[macro_use] extern crate log;
+
 use env_logger;
 use pdf::file::File as PdfFile;
 use pdf::object::*;

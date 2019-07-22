@@ -1,18 +1,14 @@
 use std::error::Error;
-use std::hash::Hash;
-use std::cmp::Eq;
 use std::collections::HashMap;
 use sfnt::{Sfnt};
-use pathfinder_canvas::Path2D;
 use pathfinder_geometry::transform2d::Transform2F;
-use crate::{Font, Glyph, Value, Context, State, type1, type2, IResultExt};
-use itertools::Itertools;
-use nom::{IResult,
+use crate::{Font, Glyph, Value, Context, State, type1, type2, IResultExt, R};
+use nom::{
     number::complete::{be_u8, be_i8, be_u16, be_i16, be_u24, be_u32, be_i32},
     bytes::complete::{take},
     multi::{count, many0},
     combinator::map,
-    error::{make_error, ErrorKind, VerboseError},
+    error::{make_error, ErrorKind},
     Err::*,
 };
 
@@ -50,7 +46,7 @@ impl<'a> Font for CffFont<'a> {
     fn font_matrix(&self) -> Transform2F {
         self.font_matrix
     }
-    fn glyph(&self, id: u32) -> Result<Path2D, Box<dyn Error>> {
+    fn glyph(&self, id: u32) -> Result<Glyph, Box<dyn Error>> {
         let mut state = State::new();
         debug!("charstring for glyph {}", id);
         let data = self.char_strings.get(id).expect("no charstring for glyph");
@@ -62,12 +58,12 @@ impl<'a> Font for CffFont<'a> {
                 type2::charstring(data, &self.context, &mut state).expect("faild to parse charstring");
             }
         }
-        Ok(state.into_path())
+        Ok(Glyph {
+            width: 0.3,
+            path: state.into_path()
+        })
     }
 }
-
-
-pub type R<'a, T> = IResult<&'a [u8], T, VerboseError<&'a [u8]>>;
 
 pub fn read_cff(data: &[u8]) -> R<Cff> {
     let i = data;

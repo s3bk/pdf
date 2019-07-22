@@ -6,27 +6,24 @@ use std::io::Write;
 use std::mem;
 use std::convert::TryInto;
 use std::path::Path;
-use std::sync::Arc;
 use std::collections::HashMap;
-use std::rc::Rc;
+use std::fs;
 
 use pdf::file::File as PdfFile;
 use pdf::object::*;
 use pdf::primitive::Primitive;
 use pdf::backend::Backend;
-use pdf::font::Font as PdfFont;
-use pdf::content::Operation;
+use pdf::font::{Font as PdfFont, FontType};
 use pdf::error::{PdfError, Result};
 use pdf::encoding::{Encoding, Decoder};
 
 use pathfinder_content::color::ColorU;
 use pathfinder_geometry::{
-    vector::Vector2F, rect::RectF, transform2d::Transform2DF
+    vector::Vector2F, rect::RectF, transform2d::Transform2F
 };
 use pathfinder_canvas::{CanvasRenderingContext2D, CanvasFontContext, Path2D, FillStyle};
 use pathfinder_renderer::scene::Scene;
-use euclid::Vector2D;
-use font::Font;
+use font::{Font, CffFont, TrueTypeFont, Type1Font, Glyphs};
 
 macro_rules! ops_p {
     ($ops:ident, $($point:ident),* => $block:block) => ({
@@ -68,12 +65,12 @@ fn cymk2fill(c: f32, y: f32, m: f32, k: f32) -> FillStyle {
     )
 }
 
-#[derive(Clone)]
 struct FontEntry {
-    font: Box<Font>,
-    subtype: FontType,
+    glyphs: Glyphs,
+    font_matrix: Transform2F,
+    cmap: Option<HashMap<u16, u32>>, // codepoint -> glyph id
     decoder: Decoder,
-    widths: Box<[f32; 256]>
+    is_cid: bool
 }
 enum TextMode {
     Fill,
@@ -83,71 +80,10 @@ enum TextMode {
     FillAndClip,
     StrokeAndClip
 }
-struct LineLayout<'a> {
-    state: &'a TextState<'a>,
-    font: &'a FontEntry,
-    fontref: FontRef,
-    glyphs: Vec<Glyph>,
-    scale: f32,
-    advance: Vector2D<f32>,
-}
-impl<'a> LineLayout<'a> {
-    fn new(state: &'a TextState, font: &'a FontEntry) -> LineLayout<'a> {
-        LineLayout {
-            state,
-            font,
-            fontref: FontRef::new(font.font.clone()),
-            glyphs: vec![],
-            scale: state.font_size / (font.font.metrics().units_per_em as f32),
-            advance: Vector2D::zero()
-        }
-    }
-    
-    fn add_bytes_cid(&mut self, data: &[u8])
-    
-    fn add_bytes(&mut self, data: &[u8]) {
-        if self.font.is_cid {
-            return self.add_bytes_cid(bytes);
-        }
-        
-        let font = &self.font.font;
-        for b in data.bytes() {
-            if let Some(glyph_id) = font.glyph_for_char(b as char) {
-                self.glyphs.push(Glyph {
-                    font: self.fontref.clone(),
-                    glyph_id,
-                    offset: self.advance
-                });
-                
-            } else {
-                info!("{}: can't find char 0x{:02X}", self.font.font.full_name(), b);
-            }
-            
-            let dx = match b {
-                b' ' => self.state.word_space,
-                _   => self.state.char_space
-            };
-            let glyph_width = self.font.widths[b as usize];
-            if glyph_width == 0.0 {
-                info!("No glyph width for char 0x{:02X}", b);
-            }
-            self.advance.x += dx + glyph_width * self.scale;
-        }
-    }
-    fn advance(&mut self, offset: f32) {
-        self.advance.x += offset;
-    }
-    fn to_layout(self) -> Layout {
-        Layout {
-            size: self.state.font_size,
-            glyphs: self.glyphs,
-            advance: self.advance
-        }
-    }
-}
+
 struct TextState<'a> {
-    text_matrix: Transform2DF, // tracks current glyph
-    line_matrix: Transform2DF, // tracks current line
+    text_matrix: Transform2F, // tracks current glyph
+    line_matrix: Transform2F, // tracks current line
     char_space: f32, // Character spacing
     word_space: f32, // Word spacing
     horiz_scale: f32, // Horizontal scaling
@@ -161,8 +97,8 @@ struct TextState<'a> {
 impl<'a> TextState<'a> {
     fn new() -> TextState<'a> {
         TextState {
-            text_matrix: Transform2DF::default(),
-            line_matrix: Transform2DF::default(),
+            text_matrix: Transform2F::default(),
+            line_matrix: Transform2F::default(),
             char_space: 0.,
             word_space: 0.,
             horiz_scale: 1.,
@@ -175,7 +111,7 @@ impl<'a> TextState<'a> {
         }
     }
     fn translate(&mut self, v: Vector2F) {
-        let m = Transform2DF::from_translation(v).post_mul(&self.line_matrix);
+        let m = self.line_matrix * Transform2F::from_translation(v);
         self.set_matrix(m);
     }
     
@@ -184,30 +120,50 @@ impl<'a> TextState<'a> {
         self.translate(Vector2F::new(0., -self.leading * self.font_size));
     }
     // set text and line matrix
-    fn set_matrix(&mut self, m: Transform2DF) {
+    fn set_matrix(&mut self, m: Transform2F) {
         self.text_matrix = m;
         self.line_matrix = m;
     }
-    fn draw_text(&mut self, canvas: &mut CanvasRenderingContext2D, text: &[u8]) {
+    fn add_glyphs(&mut self, canvas: &mut CanvasRenderingContext2D, glyphs: impl Iterator<Item=(u32, bool)>) {
+        let base = Transform2F::row_major(self.horiz_scale, 0., 0., -1.0, 0., self.rise);
+        let font = self.font.as_ref().unwrap();
+        let mut advance = 0.;
+        for (gid, is_space) in glyphs {
+            let glyph = font.glyphs.get(gid as u32).unwrap();
+            
+            let transform = base * self.text_matrix * font.font_matrix;
+            
+            canvas.set_current_transform(&transform);
+            canvas.fill_path(glyph.path.clone());
+            
+            let dx = match is_space {
+                true => self.word_space,
+                false => self.char_space
+            };
+            
+            self.text_matrix = self.text_matrix * Transform2F::from_translation(Vector2F::new(glyph.width + dx, 0.));
+        }
+    }
+    fn add_text_cid(&mut self, canvas: &mut CanvasRenderingContext2D, data: &[u8]) {
+        self.add_glyphs(canvas, data.chunks_exact(2).map(|s| {
+            let sid = u16::from_be_bytes(s.try_into().unwrap());
+            (sid as u32, sid == 0x20)
+        }));
+    }
+    fn draw_text(&mut self, canvas: &mut CanvasRenderingContext2D, data: &[u8]) {
         if let Some(font) = self.font {
-            let mut layout = LineLayout::new(self, font);
-            for &b in text {
-                layout.add_byte(b);
+            if font.is_cid {
+                return self.add_text_cid(canvas, data);
             }
-            let layout = layout.to_layout();
-            self.draw_layout(canvas, layout);
+            
+            let cmap = font.cmap.as_ref().expect("no cmap");
+            self.add_glyphs(canvas, data.iter().map(|&b| {
+                (*cmap.get(&(b as u16)).expect("can't decode byte"), b == 0x20)
+            }));
         }
     }
     fn advance(&mut self, v: Vector2F) {
-        self.text_matrix = Transform2DF::from_translation(v).post_mul(&self.text_matrix);
-    }
-    fn draw_layout(&mut self, canvas: &mut CanvasRenderingContext2D, layout: Layout) {
-        let transform = Transform2DF::row_major(self.horiz_scale, 0., 0., -1.0, 0., self.rise)
-            .post_mul(&self.text_matrix);
-        
-        let advance = layout.advance;
-        canvas.fill_layout(&layout, transform);
-        self.advance(Vector2F::new(advance.x * self.horiz_scale, 0.));
+        self.text_matrix = self.text_matrix * Transform2F::from_translation(v);
     }
 }
 
@@ -215,32 +171,75 @@ pub struct Cache {
     // shared mapping of fontname -> font
     fonts: HashMap<String, FontEntry>
 }
+
+fn truetype(data: &[u8], encoding: &Encoding) -> FontEntry {
+    let font = TrueTypeFont::parse(data)
+        .expect("can't parse TrueType font");
+    
+    let decoder = Decoder::new(encoding);
+    // build cmap
+    let cmap = (0 ..= 255)
+        .filter_map(|b| decoder.decode_byte(b).map(|c| (b as u16, font.info.find_glyph_index(c as u32))))
+        .collect();
+    
+    FontEntry {
+        glyphs: font.glyphs(),
+        cmap: Some(cmap),
+        decoder,
+        is_cid: false,
+        font_matrix: font.font_matrix()
+    }
+}
+fn opentype(data: &[u8], encoding: &Encoding) -> FontEntry {
+    let font = CffFont::parse_opentype(data, 0).unwrap();
+    FontEntry {
+        glyphs: font.glyphs(),
+        cmap: None,
+        decoder: Decoder::new(encoding),
+        is_cid: false,
+        font_matrix: font.font_matrix()
+    }
+}
+fn cff(data: &[u8], encoding: &Encoding) -> FontEntry {
+    let font = CffFont::parse(data, 0).unwrap();
+    FontEntry {
+        glyphs: font.glyphs(),
+        cmap: None,
+        decoder: Decoder::new(encoding),
+        is_cid: false,
+        font_matrix: font.font_matrix()
+    }
+}
+fn type1(data: &[u8], encoding: &Encoding) -> FontEntry {
+    let font = Type1Font::parse(data)
+        .expect("can't parse Type1 font");
+    let decoder = Decoder::new(encoding);
+    
+    FontEntry {
+        glyphs: font.glyphs(),
+        cmap: None,
+        decoder,
+        is_cid: false,
+        font_matrix: font.font_matrix()
+    }
+}
+
 impl Cache {
     pub fn new() -> Cache {
         Cache {
             fonts: HashMap::new()
         }
     }
-    fn load_built_in_font(&mut self, font: &PdfFont) -> Option<Box<Font>> {
-        font.standard_font().map(|filename| {
-            let font_path = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap()
-                .join("fonts")
-                .join(filename);
-            let data = fs::read(font_path).unwrap();
-            match filename.rsplit(".").nth(0).unwrap() {
-                "otf" => font::opentype(data),
-                "ttf" => font::truetype(data),
-                "PFB" => font::type1(data),
-                e => panic!("unknown file extension .{}", ext)
-            }
-        })
-    }
     fn load_font(&mut self, pdf_font: &PdfFont) {
         if self.fonts.get(&pdf_font.name).is_some() {
             return;
         }
         dbg!(pdf_font);
-        let mut font = match (self.load_built_in_font(&pdf_font), pdf_font.data()) {
+        
+        let encoding = pdf_font.encoding();
+        let decoder = Decoder::new(encoding);
+        
+        let mut entry = match (pdf_font.standard_font(), pdf_font.embedded_data()) {
             (_, Some(Ok(data))) => {
                 let ext = match pdf_font.subtype {
                     FontType::Type1 | FontType::CIDFontType0 => ".pfb",
@@ -249,54 +248,39 @@ impl Cache {
                 };
                 ::std::fs::File::create(&format!("/tmp/fonts/{}{}", pdf_font.name, ext)).unwrap().write_all(data).unwrap();
                 
+                
                 match pdf_font.subtype {
-                    FontType::TrueType | FontType::CIDFontType2 => TrueTypeFont::parse(data, 0)
-                        .expect("can't parse truetype font"),
-                    FontType::CIDFontType0 => CffFont::parse(data, 0).expect("can't parse CFF font")
+                    FontType::TrueType | FontType::CIDFontType2 => truetype(data, encoding),
+                    FontType::CIDFontType0 => cff(data, encoding),
                     t => panic!("Fonttype {:?} not yet implemented")
                 }
             }
-            (Some(f), _) => f,
+            (Some(filename), _) => {
+                let font_path = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap()
+                    .join("fonts")
+                    .join(filename);
+                let data = fs::read(font_path).unwrap();
+                match filename.rsplit(".").nth(0).unwrap() {
+                    "otf" => opentype(&data, encoding),
+                    "ttf" => truetype(&data, encoding),
+                    "PFB" => type1(&data, encoding),
+                    e => panic!("unknown file extension .{}", e)
+                }
+            }
             (None, Some(Err(e))) => panic!("can't decode font data: {:?}", e),
             (None, None) => {
-                dbg!(font);
+                info!("Font: {:?}", pdf_font);
                 warn!("No font data for {}. Glyphs will be missing.", pdf_font.name);
                 return;
             }
         };
         
-        let widths = match pdf_font.widths() {
-            Ok(Some(widths)) => widths,
-            Err(e) => {
-                error!("can't get font widths: {:?}", e);
-                return;
-            }
-            Ok(None) => {
-                let mut widths = [0.0; 256];
-                warn!("Font {} without widhts", pdf_font.name);
-                for b in 0u8 ..= 255 {
-                    if let Some(glyph) = ft_font.glyph_for_char(b as char) {
-                        if let Ok(v) = ft_font.advance(glyph) {
-                            widths[b as usize] = v.x;
-                        }
-                    }
-                }
-                widths
-            }
-        };
-        
-        let is_cid = match pdf_font.subtype {
-            FontType::CIDFontType0 || FontType::CIDFontType2 => true,
-            _ => false
-        };
+        match pdf_font.subtype {
+            FontType::CIDFontType0 | FontType::CIDFontType2 => entry.is_cid = true,
+            _ => {}
+        }
             
-        self.fonts.insert(font.name.clone(), FontEntry {
-            font,
-            subtype: font.subtype,
-            decoder: Decoder::new(encoding),
-            widths: Box::new(widths),
-            is_cid
-        });
+        self.fonts.insert(pdf_font.name.clone(), entry);
     }
     fn get_font(&self, font_name: &str) -> Option<&FontEntry> {
         self.fonts.get(font_name)
@@ -311,7 +295,7 @@ impl Cache {
         
         let mut canvas = CanvasRenderingContext2D::new(CanvasFontContext::from_system_source(), rect.size());
         canvas.stroke_rect(RectF::new(Vector2F::default(), rect.size()));
-        let root_tansformation = Transform2DF::row_major(1.0, 0.0, 0.0, -1.0, -left, top);
+        let root_tansformation = Transform2F::row_major(1.0, 0.0, 0.0, -1.0, -left, top);
         canvas.set_current_transform(&root_tansformation);
         debug!("transform: {:?}", canvas.current_transform());
         
@@ -408,9 +392,7 @@ impl Cache {
                 }
                 "cm" => { // modify transformation matrix 
                     ops!(ops, a: f32, b: f32, c: f32, d: f32, e: f32, f: f32 => {
-                        let tr = canvas.current_transform().pre_mul(
-                            &Transform2DF::row_major(a, b, c, d, e, f)
-                        );
+                        let tr = canvas.current_transform() * Transform2F::row_major(a, b, c, d, e, f);
                         canvas.set_current_transform(&tr);
                     })
                 }
@@ -435,11 +417,9 @@ impl Cache {
                     }
                     if let Some((ref font, size)) = gs.font {
                         if let Some(e) = self.get_font(&font.name) {
-                            canvas.set_font(e.font.clone());
-                            canvas.set_font_size(size);
                             state.font = Some(e);
                             state.font_size = size;
-                            debug!("new font: {} at size {}", e.font.full_name(), size);
+                            debug!("new font: {} at size {}", font.name, size);
                         } else {
                             state.font = None;
                         }
@@ -507,10 +487,8 @@ impl Cache {
                 "Tf" => ops!(ops, font_name: &str, size: f32 => {
                     let font = resources.fonts.get(font_name)?;
                     if let Some(e) = self.get_font(&font.name) {
-                        canvas.set_font(e.font.clone());
                         state.font = Some(e);
-                        debug!("new font: {}", e.font.full_name());
-                        canvas.set_font_size(size);
+                        debug!("new font: {}", font.name);
                         state.font_size = size;
                     } else {
                         state.font = None;
@@ -551,7 +529,7 @@ impl Cache {
                 
                 // Set the text matrix and the text line matrix
                 "Tm" => ops!(ops, a: f32, b: f32, c: f32, d: f32, e: f32, f: f32 => {
-                    state.set_matrix(Transform2DF::row_major(a, b, c, d, e, f));
+                    state.set_matrix(Transform2F::row_major(a, b, c, d, e, f));
                 }),
                 
                 // Move to the start of the next line
@@ -579,23 +557,20 @@ impl Cache {
                 }),
                 "TJ" => ops!(ops, array: &[Primitive] => {
                     if let Some(font) = state.font {
-                        let mut layout = LineLayout::new(&state, font);
                         let mut text: Vec<u8> = Vec::new();
                         for arg in array {
                             match arg {
                                 Primitive::String(ref data) => {
-                                    layout.add_bytes(data.as_bytes());
+                                    state.draw_text(&mut canvas, data.as_bytes());
                                     text.extend(data.as_bytes());
                                 },
                                 p => {
                                     let offset = p.as_number().expect("wrong argument to TJ");
-                                    layout.advance(-0.001 * offset); // because why not PDF…
+                                    state.advance(Vector2F::new(-0.001 * offset, 0.)); // because why not PDF…
                                 }
                             }
                         }
                         debug!("Text: {}", font.decoder.decode_bytes(&text));
-                        let layout = layout.to_layout();
-                        state.draw_layout(&mut canvas, layout);
                     }
                 }),
                 _ => {}

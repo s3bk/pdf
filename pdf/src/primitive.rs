@@ -62,7 +62,9 @@ impl Dictionary {
         self.dict.iter()
     }
     pub fn remove(&mut self, key: &str) -> Option<Primitive> {
-        self.dict.remove(key)
+        let v = self.dict.remove(key);
+        debug!("{} -> {:?}", key, v);
+        v
     }
     /// like remove, but takes the name of the calling type and returns `PdfError::MissingEntry` if the entry is not found
     pub fn require(&mut self, typ: &'static str, key: &str) -> Result<Primitive> {
@@ -424,26 +426,6 @@ impl<'a> TryInto<&'a str> for &'a Primitive {
                 expected: "Name or String",
                 found: p.get_debug_name()
             })
-        }
-    }
-}
-
-impl<T: Object> Object for Option<T> {
-    fn serialize<W: io::Write>(&self, _out: &mut W) -> Result<()> {
-        // TODO: the Option here is most often or always about whether the entry exists in a
-        // dictionary. Hence it should probably be more up to the Dictionary impl of serialize, to
-        // handle Options. 
-        unimplemented!();
-    }
-    fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
-        match p {
-            Primitive::Null => Ok(None),
-            p => match T::from_primitive(p, r) {
-                Ok(p) => Ok(Some(p)),
-                // References to non-existing objects ought not to be an error
-                Err(PdfError::NullRef {..}) => Ok(None),
-                Err(e) => Err(e),
-            }
         }
     }
 }

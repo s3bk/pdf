@@ -1,4 +1,14 @@
-/*
+use std::io::{self, Read};
+use std::error::Error;
+use nom::{IResult,
+    number::complete::{be_u8, le_u8, be_i32, le_u32},
+    bytes::complete::{tag, take_while},
+    sequence::preceded,
+};
+use crate::{Font, Glyph, Context, State, v, R, IResultExt};
+use crate::postscript::{Vm, Item};
+use crate::parsers::*;
+
 struct Decoder {
     r: u16,
 }
@@ -8,12 +18,12 @@ impl Decoder {
             r
         }
     }
-    fn decode_byte(cipher: u8) -> u8 {
+    fn decode_byte(&mut self, cipher: u8) -> u8 {
         const C1: u16 = 52845;
         const C2: u16 = 22719;
         
-        let plain = cipher ^ (self.r >> 8);
-        self.r = (cipher + self.r) * C1 + C2;
+        let plain = cipher ^ (self.r >> 8) as u8;
+        self.r = (cipher as u16).wrapping_add(self.r).wrapping_mul(C1).wrapping_add(C2);
         
         return plain;
     }
@@ -24,15 +34,16 @@ struct ExecReader<R: Read> {
     decoder: Decoder
 }
 impl<R: Read> ExecReader<R> {
-    fn new(reader: R, skip: usize, r: u16) -> io::Result<Decoder<R>> {
-        let mut decoder = Decoder::new(r);
-        for _ in 0 .. skip {
-            self.read(&mut [0])?;
-        }
-        Ok(Decoder {
+    fn new(reader: R, skip: usize, r: u16) -> io::Result<ExecReader<R>> {
+        let decoder = Decoder::new(r);
+        let mut e = ExecReader {
             reader,
             decoder
-        })
+        };
+        for _ in 0 .. skip {
+            e.read(&mut [0])?;
+        }
+        Ok(e)
     }
 }
 impl<R: Read> Read for ExecReader<R> {
@@ -44,15 +55,79 @@ impl<R: Read> Read for ExecReader<R> {
         Ok(len)
     }
 }
-*/
 
-use pathfinder_geometry::vector::Vector2F;
-use pathfinder_canvas::Path2D;
-use nom::{IResult,
-    number::complete::{be_u8, be_i8, be_i32}
-};
-use crate::{Context, Value, State, v};
+pub struct Type1Font {
+}
+impl Font for Type1Font {
+    fn num_glyphs(&self) -> u32 { 0 }
+    fn glyph(&self, _id: u32) -> Result<Glyph, Box<dyn Error>> {
+        unimplemented!()
+    }
+}
+impl Type1Font {
+    pub fn parse(data: &[u8]) -> Result<Self, Box<dyn Error>> {
+        Ok(type1(data).get())
+    }
+}
+fn parse_text<'a>(vm: &mut Vm, data: &'a [u8]) -> R<'a, ()> {
+    let mut input = data;
+    while input.len() > 0 {
+        if let Ok((i, _)) = preceded(tag("%"), take_until_and_consume(line_sep))(input) {
+            input = i;
+            continue;
+        }
+        
+        vm.print_stack();
+        let (i, item) = vm.parse(input)?;
+        match item {
+            Item::Name(ref name) if name == "currentfile" => {},
+            Item::Name(ref name) if name == "eexec" => break,
+            _ => vm.exec(item)
+        }
+        
+        let (i, _) = take_while(word_sep)(i)?;
+        input = i;
+    }
+    Ok((input, ()))
+}
+fn parse_binary<'a>(vm: &mut Vm, data: &'a [u8]) {
+    let mut decoder = Decoder::new(55665);
+    let decoded: Vec<u8> = data.iter().map(|&b| decoder.decode_byte(b)).collect();
+    
+    parse_text(vm, &decoded[4 ..]).get()
+}
 
+#[test]
+fn test_parser() {
+    let mut vm = Vm::new();
+    parse_text(&mut vm, b"/FontBBox{-180 -293 1090 1010}readonly ");
+    vm.print_stack();
+    assert_eq!(vm.stack().len(), 2);
+}
+fn type1(i: &[u8]) -> R<Type1Font> {
+    let mut vm = Vm::new();
+    
+    let mut input = i;
+    while input.len() > 0 {
+    let (i, magic) = le_u8(input)?;
+        assert_eq!(magic, 0x80);
+        let (i, block_type) = le_u8(i)?;
+        
+        let (i, block_len) = le_u32(i)?;
+        info!("block type {}, length: {}", block_type, block_len);
+    
+        let block = &i[.. block_len as usize];
+        match block_type {
+            1 => parse_text(&mut vm, block).get(),
+            2 => parse_binary(&mut vm, block),
+            n => panic!("unknown block type {}", n)
+        }
+        
+        input = &i[block_len as usize ..];
+    }
+    
+    panic!()
+}
 pub fn charstring<'a, 'b>(mut input: &'a [u8], ctx: &Context<'a>, s: &'b mut State) -> IResult<&'a [u8], ()> {
     let i = loop {
         debug!("stack: {:?}", s.stack);

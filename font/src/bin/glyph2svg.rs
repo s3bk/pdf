@@ -26,7 +26,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     
     let transform = Transform2F::from_translation(Vector2F::new(0., 1000.)) * Transform2F::from_scale(Vector2F::new(1.0, -1.0));
     canvas.set_current_transform(&transform);
-    canvas.fill_path(font.glyph(gid)?);
+    canvas.fill_path(font.glyph(gid)?.path);
     canvas.into_scene().export(&mut BufWriter::new(File::create("glyph.svg")?), FileFormat::SVG)?;
     
     Ok(())

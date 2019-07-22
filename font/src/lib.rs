@@ -1,4 +1,5 @@
 #[macro_use] extern crate log;
+#[macro_use] extern crate slotmap;
 
 use std::error::Error;
 use pathfinder_canvas::Path2D;
@@ -8,8 +9,11 @@ use std::fmt;
 use nom::{IResult, Err::*, error::VerboseError};
 
 pub struct Glyph {
+    /// unit 1em
     pub width: f32,
-    pub path: Path2D
+    
+    /// transform by font_matrix to scale it to 1em
+    pub path: Path2D 
 }
 
 pub trait Font {
@@ -18,25 +22,34 @@ pub trait Font {
         Transform2F::row_major(1.0, 0., 0., 1., 0., 0.)
     }
     fn glyph(&self, id: u32) -> Result<Glyph, Box<dyn Error>>;
+    fn glyphs(&self) -> Glyphs {
+        Glyphs {
+            glyphs: (0 .. self.num_glyphs()).map(|i| self.glyph(i).unwrap()).collect()
+        }
+    }
+}
+
+pub struct Glyphs {
+    glyphs: Vec<Glyph>
+}
+impl Glyphs {
+    pub fn get(&self, idx: u32) -> Option<&Glyph> {
+        self.glyphs.get(idx as usize)
+    }
 }
 
 mod truetype;
 mod cff;
 mod type1;
 mod type2;
+mod postscript;
+mod parsers;
 
-use truetype::TrueTypeFont;
-use cff::CffFont;
+pub use truetype::TrueTypeFont;
+pub use cff::CffFont;
+pub use type1::Type1Font;
 
-pub fn opentype(data: &[u8]) -> Box<Font> {
-    CffFont::parse_opentype(data, 0).expect("failed to parse OpenType Font")
-}
-pub fn truetype(data: &[u8]) -> Box<Font> {    
-    TrueTypeFont::parse(data, 0).expect("failed to parse TrueType Font")
-}
-pub fn cff(data: &[u8]) -> Box<Font> {
-    CffFont::parse(data, 0).expect("failed to parse Compact Font Format")
-}
+pub type R<'a, T> = IResult<&'a [u8], T, VerboseError<&'a [u8]>>;
 
 #[derive(Copy, Clone)]
 pub enum Value {
@@ -127,7 +140,8 @@ pub struct State {
     pub lsp: Option<Vector2F>,
     pub char_width: Option<f32>,
     pub done: bool,
-    pub stem_hints: u32
+    pub stem_hints: u32,
+    pub delta_width: f32
 }
 
 impl State {
@@ -139,7 +153,8 @@ impl State {
             lsp: None,
             char_width: None,
             done: false,
-            stem_hints: 0
+            stem_hints: 0,
+            delta_width: 0.
         }
     }
     pub fn into_path(self) -> Path2D {
@@ -166,6 +181,7 @@ impl<T> IResultExt for IResult<&[u8], T, VerboseError<&[u8]>> {
             Err(Error(v)) | Err(Failure(v)) => {
                 for (i, e) in v.errors {
                     println!("{:?} {:?}", &i[.. i.len().min(20)], e);
+                    println!("{:?}", String::from_utf8_lossy(&i[.. i.len().min(20)]));
                 }
                 panic!()
             }

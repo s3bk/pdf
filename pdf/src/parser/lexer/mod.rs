@@ -9,7 +9,7 @@ use std::io::SeekFrom;
 use crate::error::*;
 
 mod str;
-pub use self::str::StringLexer;
+pub use self::str::{StringLexer, HexStringLexer};
 
 
 /// `Lexer` has functionality to jump around and traverse the PDF lexemes of a string in any direction.

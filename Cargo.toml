@@ -1,12 +1,12 @@
 [workspace]
 members = [
-    "derive",
     "pdf",
+    "pdf_derive",
     "view",
     "examples",
     "font"
 ]
 default-members = [
-    "derive",
     "pdf",
+    "pdf_derive",
 ]

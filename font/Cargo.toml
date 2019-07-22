@@ -13,7 +13,11 @@ pathfinder_export = { git = "https://github.com/s3bk/pathfinder/", branch="local
 pathfinder_geometry = { git = "https://github.com/s3bk/pathfinder/", branch="local-skribo" }
 stb_truetype = "0.2.2"
 nom = "5.0"
-itertools = "*"
 log = "*"
 env_logger = "*"
 rand = "*"
+slotmap = { version = "0.3", features = ["unstable"] }
+tuple = "*"
+decorum = "*"
+itertools = "*"
+istring = "*"

@@ -1,7 +1,7 @@
 use crate::{Context, State, v, Value};
 use nom::{IResult,
     bytes::complete::{take},
-    number::complete::{be_u8, be_i8, be_i16, be_i32}
+    number::complete::{be_u8, be_i16, be_i32}
 };
 
 macro_rules! point {
@@ -260,21 +260,21 @@ pub fn charstring<'a, 'b>(mut input: &'a [u8], ctx: &Context<'a>, s: &'b mut Sta
                     31 | 32 | 33 => panic!("reserved"),
                     34 => { // |- dx1 dx2 dy2 dx3 dx4 dx5 dx6 hflex (12 34) |-
                         debug!("hflex");
-                        let mut slice = s.stack.as_slice();
-                        slice = bezier!(s, slice, x xy x  x x x);
+                        let slice = s.stack.as_slice();
+                        bezier!(s, slice, x xy x  x x x);
                         s.stack.clear();
                         i
                     }
                     35 => { // |- dx1 dy1 dx2 dy2 dx3 dy3 dx4 dy4 dx5 dy5 dx6 dy6 fd flex (12 35) |-
                         debug!("flex");
-                        let mut slice = s.stack.as_slice();
+                        let slice = s.stack.as_slice();
                         bezier!(s, slice, xy xy xy  xy xy xy);
                         s.stack.clear();
                         i
                     }
                     36 => { // |- dx1 dy1 dx2 dy2 dx3 dx4 dx5 dy5 dx6 hflex1 (12 36) |-
                         debug!("hflex1");
-                        let mut slice = s.stack.as_slice();
+                        let slice = s.stack.as_slice();
                         bezier!(s, slice, xy xy x  x xy x);
                         s.stack.clear();
                         i
@@ -342,7 +342,7 @@ pub fn charstring<'a, 'b>(mut input: &'a [u8], ctx: &Context<'a>, s: &'b mut Sta
                 while slice.len() >= 8 {
                     slice = bezier!(s, slice, xy xy xy);
                 }
-                slice = lines!(s, slice, xy);
+                lines!(s, slice, xy);
                 
                 s.stack.clear();
                 i
@@ -398,14 +398,14 @@ pub fn charstring<'a, 'b>(mut input: &'a [u8], ctx: &Context<'a>, s: &'b mut Sta
                         slice = bezier!(s, slice, x xy y y xy x);
                     }
                     if slice.len() == 9 {
-                        slice = bezier!(s, slice, x xy y y xy xy);
+                         bezier!(s, slice, x xy y y xy xy);
                     }
                 } else { // second case
                     while slice.len() > 9 || slice.len() == 8 {
                         slice = bezier!(s, slice, y xy x x xy y);
                     }
                     if slice.len() == 9 {
-                        slice = bezier!(s, slice, y xy x x xy yx);
+                        bezier!(s, slice, y xy x x xy yx);
                     }
                 }
                 
@@ -424,14 +424,14 @@ pub fn charstring<'a, 'b>(mut input: &'a [u8], ctx: &Context<'a>, s: &'b mut Sta
                         slice = bezier!(s, slice, y xy x x xy y);
                     }
                     if slice.len() == 9 {
-                        slice = bezier!(s, slice, y xy x x xy yx);
+                        bezier!(s, slice, y xy x x xy yx);
                     }
                 } else { // second case
                     while slice.len() > 9 || slice.len() == 8 {
                         slice = bezier!(s, slice, x xy y y xy x);
                     }
                     if slice.len() == 9 {
-                        slice = bezier!(s, slice, x xy y y xy xy);
+                        bezier!(s, slice, x xy y y xy xy);
                     }
                 }
                 

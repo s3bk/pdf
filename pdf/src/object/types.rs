@@ -131,6 +131,7 @@ fn inherit<T, F, B: Backend>(mut parent: Ref<PagesNode>, file: &File<B>, f: F) -
     where F: Fn(&PageTree) -> Option<T>
 {
     while let PagesNode::Tree(ref page_tree) = *file.get(parent)? {
+        debug!("parent: {:?}", page_tree);
         match (page_tree.parent, f(&page_tree)) {
             (_, Some(t)) => return Ok(Some(t)),
             (Some(ref p), None) => parent = *p,

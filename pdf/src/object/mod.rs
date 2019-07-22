@@ -280,7 +280,7 @@ impl<V: Object> Object for BTreeMap<String, V> {
     }
 }
 
-impl<T: Object> Object for Rc<T> {
+impl<T: Object + std::fmt::Debug> Object for Rc<T> {
     fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()> {
         (**self).serialize(out)
     }
@@ -288,6 +288,26 @@ impl<T: Object> Object for Rc<T> {
         match p {
             Primitive::Reference(r) => resolve.get(Ref::new(r)),
             p => Ok(Rc::new(T::from_primitive(p, resolve)?))
+        }
+    }
+}
+
+impl<T: Object> Object for Option<T> {
+    fn serialize<W: io::Write>(&self, _out: &mut W) -> Result<()> {
+        // TODO: the Option here is most often or always about whether the entry exists in a
+        // dictionary. Hence it should probably be more up to the Dictionary impl of serialize, to
+        // handle Options. 
+        unimplemented!();
+    }
+    fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
+        match p {
+            Primitive::Null => Ok(None),
+            p => match T::from_primitive(p, resolve) {
+                Ok(p) => Ok(Some(p)),
+                // References to non-existing objects ought not to be an error
+                Err(PdfError::NullRef {..}) => Ok(None),
+                Err(e) => Err(e),
+            }
         }
     }
 }

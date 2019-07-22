@@ -52,7 +52,7 @@ pub trait Backend: Sized {
                 None => None
             }
         };
-        println!("READ XREF AND TABLE");
+        trace!("READ XREF AND TABLE");
         while let Some(prev_xref_offset) = prev_trailer {
             let mut lexer = Lexer::new(self.read(prev_xref_offset as usize..)?);
             let (xref_sections, trailer) = read_xref_and_trailer_at(&mut lexer, &NoResolve)?;
@@ -75,13 +75,13 @@ pub trait Backend: Sized {
 
 impl Backend for Mmap {
     fn read<T: IndexRange>(&self, range: T) -> Result<&[u8]> {
-        let r = range.to_range(self.len());
+        let r = range.to_range(self.len())?;
         Ok(unsafe {
             &self.as_slice()[r]
         })
     }
     fn write<T: IndexRange>(&mut self, range: T) -> Result<&mut [u8]> {
-        let r = range.to_range(self.len());
+        let r = range.to_range(self.len())?;
         Ok(unsafe {
             &mut self.as_mut_slice()[r]
         })
@@ -94,11 +94,11 @@ impl Backend for Mmap {
 
 impl Backend for Vec<u8> {
     fn read<T: IndexRange>(&self, range: T) -> Result<&[u8]> {
-        let r = range.to_range(self.len());
+        let r = range.to_range(self.len())?;
         Ok(&self[r])
     }
     fn write<T: IndexRange>(&mut self, range: T) -> Result<&mut [u8]> {
-        let r = range.to_range(self.len());
+        let r = range.to_range(self.len())?;
         Ok(&mut self[r])
     }
     fn len(&self) -> usize {
@@ -120,8 +120,14 @@ pub trait IndexRange
     fn end(&self) -> Option<usize> { None }
 
     /// `len`: the size of whatever container that is being indexed
-    fn to_range(&self, len: usize) -> Range<usize> {
-        self.start().unwrap_or(0) .. self.end().unwrap_or(len)
+    fn to_range(&self, len: usize) -> Result<Range<usize>> {
+        match (self.start(), self.end()) {
+            (None, None) => Ok(0 .. len),
+            (Some(start), _) if start <= len => Ok(start .. len),
+            (None, Some(end)) if end <= len => Ok(0 .. end),
+            (Some(start), Some(end)) if start <= end && end <= len => Ok(start .. end),
+            _ => return Err(PdfError::EOF)
+        }
     }
 }
 

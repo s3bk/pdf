@@ -8,6 +8,7 @@ edition = "2018"
 
 [dependencies]
 pdf = { path = "../pdf" }
+font = { path = "../font" }
 pathfinder_geometry = { git = "https://github.com/s3bk/pathfinder/", branch="local-skribo" }
 pathfinder_content = { git = "https://github.com/s3bk/pathfinder/", branch="local-skribo" }
 pathfinder_canvas = { git = "https://github.com/s3bk/pathfinder/", branch="local-skribo" }

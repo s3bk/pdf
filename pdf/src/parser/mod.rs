@@ -7,12 +7,12 @@ mod parse_xref;
 pub use self::lexer::*;
 pub use self::parse_object::*;
 pub use self::parse_xref::*;
-use self::lexer::{StringLexer};
 
 use crate::enc::decode_hex;
 use crate::error::*;
 use crate::primitive::{Primitive, Dictionary, PdfStream, PdfString};
 use crate::object::{ObjNr, GenNr, PlainRef, Resolve};
+use self::lexer::{HexStringLexer, StringLexer};
 
 /// Can parse stream but only if its dictionary does not contain indirect references.
 /// Use `parse_stream` if this is insufficient.
@@ -127,10 +127,20 @@ pub fn parse_with_lexer(lexer: &mut Lexer, r: &impl Resolve) -> Result<Primitive
 
         Primitive::String (PdfString::new(string))
     } else if first_lexeme.equals(b"<") {
-        let hex_str = lexer.next()?.to_vec();
-        lexer.next_expect(">")?;
-        let data = decode_hex(&hex_str)?;
-        Primitive::String (PdfString::new(data))
+        let mut string: Vec<u8> = Vec::new();
+
+        let bytes_traversed = {
+            let mut hex_string_lexer = HexStringLexer::new(lexer.get_remaining_slice());
+            for byte in hex_string_lexer.iter() {
+                let byte = byte?;
+                string.push(byte);
+            }
+            hex_string_lexer.get_offset()
+        };
+        // Advance to end of string
+        lexer.offset_pos(bytes_traversed);
+
+        Primitive::String (PdfString::new(string))
     } else if first_lexeme.equals(b"true") {
         Primitive::Boolean (true)
     } else if first_lexeme.equals(b"false") {

@@ -1,6 +1,6 @@
 [package]
 name = "pdf"
-version = "0.6.2"
+version = "0.7.0"
 authors = ["Erlend Hofstad Langseth <3rlendhl@gmail.com>", "Sebastian Köln <sebk@rynx.org>"]
 repository = "https://github.com/pdf-rs"
 readme = "README.md"
@@ -15,10 +15,7 @@ Read, alter and write PDF files.
 
 
 [dependencies.pdf_derive]
-path = "../derive"
-
-[dependencies.adobe-cmap-parser]
-path = "../../adobe-cmap-parser"
+path = "../pdf_derive"
 
 [dependencies]
 snafu = "0.4"
