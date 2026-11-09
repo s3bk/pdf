@@ -206,3 +206,39 @@ fn tiff_sample_depths_and_row_padding() {
         );
     }
 }
+
+#[test]
+fn prototype_file_from_the_pdf_association() {
+    // Written by a producer (the PDF Association's Brotli prototypes), not by
+    // hand: 25 pages, and every stream in the file is a Brotli stream - the
+    // content streams, the object stream and the cross-reference stream. A
+    // reader that cannot decode BrotliDecode cannot even find the pages.
+    // Provenance and licence note: tests/resources/brotli/prototype/README.txt
+    let data = std::fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/resources/brotli/prototype/Brotli-Prototype-FileA.pdf"
+    ))
+    .unwrap();
+    let file = FileOptions::cached().load(data).unwrap();
+    let resolver = file.resolver();
+    assert_eq!(file.num_pages(), 25);
+    let mut ops = 0;
+    for page_nr in 0..file.num_pages() {
+        let page = file.get_page(page_nr).unwrap();
+        let resources = page.resources().unwrap();
+        for name in resources.fonts.keys() {
+            assert!(
+                resources.fonts.get(name).unwrap().load(&resolver).is_ok(),
+                "font {name} on page {page_nr}"
+            );
+        }
+        ops += page
+            .contents
+            .as_ref()
+            .unwrap()
+            .operations(&resolver)
+            .unwrap()
+            .len();
+    }
+    assert!(ops > 1_000_000, "parsed {ops} operators");
+}
